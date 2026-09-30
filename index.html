@@ -10,6 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Muskelplan">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b6e69'/%3E%3Cpath d='M14 26h6v12h-6zM44 26h6v12h-6zM20 30h24v4H20zM8 29h6v6H8zM50 29h6v6h-6z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
 /* =========================================================
@@ -2434,7 +2436,7 @@ function migrate(s) {
   return out;
 }
 let state = defaultState();
-let storageState = { ok: true, warned: false, loadError: null };
+let storageState = { ok: true, warned: false, loadError: null, persisted: null };
 function loadState() {
   let raw = null;
   try { raw = localStorage.getItem(STORE_KEY); }
@@ -2981,7 +2983,7 @@ function finishOnboarding() {
     if (state.profile.weightKg && !state.body.length) state.body.push({ date: todayISO(), weightKg: state.profile.weightKg });
     createNewPlan(0, 0, {}, true);
     ui.onboarding = null; state.onboardingDraft = null;
-    save(true);
+    save(true); requestPersistentStorage();
     toast('Dein Plan ist fertig. Viel Erfolg!');
     go('plan');
     render();
@@ -3832,6 +3834,8 @@ function viewProfile() {
       <button type="button" class="btn danger" data-action="delete-all">Alle Daten löschen</button>
     </div>
     <p class="hint">${state.logs.length} Trainingslogs · ${state.body.length} Körperwerte · ${state.checkins.length} Check-ins · ${state.blocks.length} Blöcke</p>
+    ${storageState.persisted === true ? '<p class="hint">✓ Dauerhafter Speicher aktiv – der Browser löscht deine Daten nicht von selbst (beim manuellen Löschen der Browserdaten schon).</p>'
+      : storageState.persisted === false ? '<p class="hint">Der Browser hat keinen dauerhaften Speicher zugesagt und könnte die Daten bei Platzmangel oder längerer Nichtnutzung löschen. Tipp: App auf den Home-Bildschirm legen und regelmäßig ein Backup exportieren.</p>' : ''}
   </div>
 
   <div class="card"><h2>Selbsttest</h2>
@@ -4123,14 +4127,20 @@ function onSubmit(e) {
 /* =====================================================================
    INIT
    ===================================================================== */
-function registerManifest() {
+/* Offline-Betrieb: Service Worker (sw.js) nur über http(s) – beim Öffnen als lokale Datei nicht möglich */
+function registerServiceWorker() {
+  try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {}); }
+  catch (e) { /* optional */ }
+}
+/* Browser um dauerhaften Speicher bitten, damit er die Daten nicht von selbst aufräumt */
+function requestPersistentStorage() {
   try {
-    const icon512 = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0b6e69"/><path d="M14 26h6v12h-6zM44 26h6v12h-6zM20 30h24v4H20zM8 29h6v6H8zM50 29h6v6h-6z" fill="#fff"/></svg>');
-    const m = { name: 'Muskelplan', short_name: 'Muskelplan', display: 'standalone', background_color: '#0e1116', theme_color: '#0b6e69', lang: 'de', icons: [{ src: icon512, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }] };
-    const link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(m));
-    document.head.appendChild(link);
+    if (!navigator.storage || !navigator.storage.persist) return;
+    navigator.storage.persisted().then(p => (p ? true : navigator.storage.persist())).then(ok => {
+      const changed = storageState.persisted !== !!ok;
+      storageState.persisted = !!ok;
+      if (changed && ui.tab === 'profil' && !ui.onboarding) render();
+    }).catch(() => {});
   } catch (e) { /* optional */ }
 }
 function init() {
@@ -4158,7 +4168,8 @@ function init() {
   window.addEventListener('hashchange', () => { ui.tab = parseHash(); render(); $('#main').focus({ preventScroll: true }); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (state.active) requestWakeLock(); tickTimer(); } });
   setInterval(updateElapsed, 30000);
-  registerManifest();
+  registerServiceWorker();
+  if (state.profile) requestPersistentStorage();
   render();
   if (state.active) requestWakeLock();
   // Automatischer Selbsttest (leichte Stufe) nach dem ersten Rendern – Ergebnis in der Konsole
