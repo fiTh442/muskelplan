@@ -3,7 +3,7 @@
    Übrige Dateien (Manifest, Symbole): Cache zuerst.
    Trainingsdaten liegen NICHT hier, sondern im localStorage der Seite. */
 'use strict';
-const CACHE = 'muskelplan-v1';
+const CACHE = 'muskelplan-v2';
 const PAGE = './index.html';
 const ASSETS = [PAGE, './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
