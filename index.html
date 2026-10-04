@@ -938,6 +938,74 @@ const EXERCISES = [
       alternatives: ['farmer-walk-db'],
       cues: ['Voller Griff, Schultern leicht aktiv', 'Ruhig atmen', 'Auch gut zur Schultermobilität'] }),
 
+  /* ---------------- ZUHAUSE OHNE EQUIPMENT (nur Heim-Modus: equipment 'household' = Körpergewicht + Möbel) ----------------
+     Niedrige Last wirkt nahe am Muskelversagen ähnlich gut für Hypertrophie (Schoenfeld 2017) → höhere Wdh.-Bereiche. */
+  X({ id: 'pushup-decline', name: 'Liegestütz mit erhöhten Füßen', primary: ['chest'], secondary: ['triceps','delts_front'], home: true, needs: ['Stuhl oder Sofa'],
+      equipment: ['household'], category: 'compound', repRange: [8,20], restSec: [90,120], loadType: 'bodyweight', contraindications: ['wrist','shoulder'],
+      alternatives: ['pushup'], cues: ['Füße auf Stuhl oder Sofakante, Körper gerade', 'Brust bis knapp über den Boden, Ellbogen ca. 45° vom Körper', 'Zu schwer? Normale Liegestütz'], evidenceRef: ['schoenfeld2017load'] }),
+  X({ id: 'pike-pushup', name: 'Pike-Liegestütz (Hüfte hoch)', primary: ['delts_front'], secondary: ['triceps'], home: true,
+      equipment: ['household'], category: 'compound', repRange: [6,15], restSec: [90,120], loadType: 'bodyweight', contraindications: ['shoulder','wrist'],
+      alternatives: ['pushup-decline'], cues: ['Hüfte hoch (umgedrehtes V), Hände schulterbreit', 'Kopf vor die Hände Richtung Boden absenken', 'Schwerer: Füße auf Stuhl oder Sofa'], evidenceRef: ['schoenfeld2017load'] }),
+  X({ id: 'lateral-door-iso', name: 'Seitheben isometrisch im Türrahmen', primary: ['delts_side'], secondary: [], home: true, needs: ['Türrahmen'],
+      equipment: ['household'], repRange: [20,40], unit: 's', restSec: [45,90], loadType: 'bodyweight', contraindications: ['shoulder'],
+      alternatives: [], cues: ['Im Türrahmen stehen, Handrücken außen gegen den Rahmen', 'Mit ca. 70–80 % Kraft nach außen drücken, Schultern tief', 'Ruhig weiteratmen, nicht pressen'] }),
+  X({ id: 'prone-yt-raise', name: 'Y-T-Heben in Bauchlage', primary: ['delts_rear'], secondary: ['upperback'], home: true,
+      equipment: ['household'], repRange: [12,20], restSec: [45,90], loadType: 'bodyweight',
+      alternatives: [], cues: ['Bauchlage, Stirn auf einem gefalteten Handtuch', 'Arme abwechselnd in Y- und T-Position anheben, oben 1–2 s halten', 'Schulterblätter nach hinten-unten ziehen'] }),
+  X({ id: 'row-table', name: 'Rudern unter dem Tisch', primary: ['upperback'], secondary: ['lats','biceps','delts_rear'], home: true, needs: ['schwerer, stabiler Tisch'],
+      equipment: ['household'], category: 'compound', repRange: [6,15], restSec: [90,120], loadType: 'bodyweight',
+      alternatives: ['row-doorframe'], cues: ['Nur an einem schweren, stabilen Tisch – vorher mit vollem Gewicht testen', 'Unter den Tisch legen, Kante schulterbreit greifen, Körper gerade', 'Brust zur Kante ziehen, langsam ablassen – Knie beugen = leichter'],
+      note: 'Sicherheit geht vor: Kippt oder rutscht der Tisch, nimm stattdessen das Rudern am Türrahmen.' }),
+  X({ id: 'row-doorframe', name: 'Einarmiges Rudern am Türrahmen', primary: ['lats'], secondary: ['upperback','biceps'], home: true, needs: ['Türrahmen'],
+      equipment: ['household'], category: 'compound', repRange: [10,20], restSec: [60,90], loadType: 'bodyweight', unilateral: true,
+      alternatives: ['row-table'], cues: ['Seitlich in den Türrahmen stellen, Rahmen auf Brusthöhe greifen', 'Füße nah am Rahmen, mit gestrecktem Arm zurücklehnen', 'Ellbogen nah am Körper zur Hüfte ziehen – je flacher du stehst, desto schwerer'] }),
+  X({ id: 'lat-prone-pull', name: 'Latzug in Bauchlage (Handtuch)', primary: ['lats'], secondary: ['upperback','delts_rear'], home: true, needs: ['Handtuch'],
+      equipment: ['household'], repRange: [12,20], restSec: [45,90], loadType: 'bodyweight',
+      alternatives: ['row-doorframe'], cues: ['Bauchlage, Handtuch mit gestreckten Armen vor dem Kopf straff auseinanderziehen', 'Ellbogen zur Hüfte ziehen, Brust leicht anheben', 'Unten 1–2 s halten, Schulterblätter nach unten'] }),
+  X({ id: 'curl-towel', name: 'Handtuch-Curl gegen den eigenen Fuß', primary: ['biceps'], secondary: ['forearms'], home: true, needs: ['Handtuch'],
+      equipment: ['household'], repRange: [8,15], restSec: [45,90], loadType: 'bodyweight',
+      alternatives: [], cues: ['Handtuchmitte unter einen Fuß, Enden fassen', 'Mit dem Bein dosiert gegenhalten: 3 s hoch, 3 s ab', 'So viel Widerstand, dass die letzten Wdh. richtig schwer werden'] }),
+  X({ id: 'dips-chair', name: 'Trizeps-Dips am Stuhl', primary: ['triceps'], secondary: ['chest','delts_front'], home: true, needs: ['stabiler Stuhl'],
+      equipment: ['household'], category: 'compound', repRange: [8,20], restSec: [60,120], loadType: 'bodyweight', contraindications: ['shoulder','elbow','wrist'],
+      alternatives: ['pushup-close'], cues: ['Stuhl mit der Lehne an die Wand stellen, Hände an die Sitzkante', 'Nur so tief, wie es in der Schulter angenehm ist', 'Beine gebeugt = leichter, gestreckt = schwerer'] }),
+  X({ id: 'triceps-ext-table', name: 'Trizepsstrecken am Tisch', primary: ['triceps'], secondary: [], home: true, needs: ['stabiler Tisch'],
+      equipment: ['household'], repRange: [8,15], restSec: [45,90], loadType: 'bodyweight', contraindications: ['elbow'],
+      alternatives: ['pushup-close'], cues: ['Hände schulterbreit an eine stabile Tischkante, Körper schräg und gerade', 'Nur die Ellbogen beugen, Stirn Richtung Hände', 'Je flacher du stehst, desto schwerer'] }),
+  X({ id: 'bulgarian-bw', name: 'Bulgarische Split-Kniebeuge (Körpergewicht)', primary: ['quads','glutes'], secondary: ['hamstrings'], home: true, needs: ['Stuhl oder Sofa'],
+      equipment: ['household'], category: 'compound', lengthenedEmphasis: true, repRange: [8,20], restSec: [60,120], loadType: 'bodyweight', unilateral: true, contraindications: ['knee'],
+      alternatives: ['lunge-reverse-bw'], cues: ['Hinterer Fuß auf Sofa oder Stuhl, vorderer Fuß weit genug vorne', 'In 3 s tief absenken, unten kurz halten', 'Oberkörper leicht nach vorne = mehr Gesäß'], evidenceRef: ['schoenfeld2017load'] }),
+  X({ id: 'squat-bw-tempo', name: 'Tempo-Kniebeuge (Körpergewicht)', primary: ['quads'], secondary: ['glutes'], home: true,
+      equipment: ['household'], category: 'compound', repRange: [15,30], restSec: [60,90], loadType: 'bodyweight', contraindications: ['knee'], capAlts: { unilateral: 'bulgarian-bw' },
+      alternatives: ['bulgarian-bw'], cues: ['3 s runter, 1 s unten halten, zügig hoch', 'So tief, wie es sauber geht, Fersen am Boden', 'Zu leicht? Bulgarische Split-Kniebeuge'] }),
+  X({ id: 'lunge-reverse-bw', name: 'Ausfallschritt rückwärts (Körpergewicht)', primary: ['quads','glutes'], secondary: [], home: true,
+      equipment: ['household'], category: 'compound', repRange: [10,20], restSec: [60,90], loadType: 'bodyweight', unilateral: true, contraindications: ['knee'],
+      alternatives: ['bulgarian-bw'], cues: ['Großer Schritt zurück, hinteres Knie Richtung Boden', 'Vorderes Knie über dem Fuß', 'Langsam absenken, kraftvoll zurück'] }),
+  X({ id: 'wall-sit', name: 'Wandsitzen', primary: ['quads'], secondary: [], home: true, needs: ['Wand'],
+      equipment: ['household'], repRange: [30,60], unit: 's', restSec: [60,90], loadType: 'bodyweight', contraindications: ['knee'],
+      alternatives: ['squat-bw-tempo'], cues: ['Rücken an die Wand, Knie ca. 90° gebeugt', 'Knie über den Füßen, ruhig weiteratmen', 'Tiefer = schwerer'] }),
+  X({ id: 'nordic-sofa', name: 'Nordic Curl (Füße unter dem Sofa)', primary: ['hamstrings'], secondary: [], home: true, needs: ['schweres Sofa', 'Kissen'],
+      equipment: ['household'], lengthenedEmphasis: true, repRange: [3,8], restSec: [90,120], loadType: 'bodyweight', contraindications: ['knee'],
+      alternatives: ['leg-curl-towel'], cues: ['Kniend, Fersen fest unter der Sofakante, Kissen unter die Knie', 'So langsam wie möglich nach vorne ablassen, mit den Händen abfangen', 'Mit den Händen abdrücken und zurück'] }),
+  X({ id: 'leg-curl-towel', name: 'Beincurl mit Handtuch (Gleiten)', primary: ['hamstrings'], secondary: ['glutes'], home: true, needs: ['Handtuch', 'glatter Boden'],
+      equipment: ['household'], repRange: [8,15], restSec: [60,90], loadType: 'bodyweight',
+      alternatives: ['nordic-sofa'], cues: ['Rückenlage, Fersen auf einem Handtuch auf glattem Boden', 'Hüfte anheben, Fersen zum Gesäß ziehen', 'Langsam wieder ausgleiten lassen – einbeinig = schwerer'] }),
+  X({ id: 'rdl-bw-single', name: 'Einbeiniges Kreuzheben (Körpergewicht)', primary: ['hamstrings','glutes'], secondary: [], home: true,
+      equipment: ['household'], category: 'compound', lengthenedEmphasis: true, repRange: [10,20], restSec: [60,90], loadType: 'bodyweight', unilateral: true,
+      alternatives: ['leg-curl-towel'], cues: ['Hüfte nach hinten, Rücken lang, Standbein leicht gebeugt', 'In 3 s bis zur deutlichen Dehnung absenken', 'Zum Gleichgewicht eine Hand an die Wand'] }),
+  X({ id: 'hipthrust-single-bw', name: 'Einbeiniges Hüftheben (Schultern auf dem Sofa)', primary: ['glutes'], secondary: ['hamstrings'], home: true, needs: ['Sofa'],
+      equipment: ['household'], category: 'compound', repRange: [10,20], restSec: [60,90], loadType: 'bodyweight', unilateral: true,
+      alternatives: ['glute-bridge-bw'], cues: ['Schultern an die Sofakante, ein Fuß fest am Boden', 'Hüfte hoch, oben 1–2 s fest anspannen', 'Kinn Richtung Brust, kein Hohlkreuz'] }),
+  X({ id: 'glute-bridge-bw', name: 'Glute Bridge (Körpergewicht)', primary: ['glutes'], secondary: ['hamstrings'], home: true,
+      equipment: ['household'], repRange: [15,30], restSec: [45,90], loadType: 'bodyweight', capAlts: { unilateral: 'hipthrust-single-bw' },
+      alternatives: ['hipthrust-single-bw'], cues: ['Rückenlage, Füße hüftbreit nah am Gesäß', 'Hüfte hoch, oben 2 s fest anspannen', 'Zu leicht? Einbeinig'] }),
+  X({ id: 'calf-single-stair', name: 'Einbeiniges Wadenheben an der Treppenstufe', primary: ['calves'], secondary: [], home: true, needs: ['Treppenstufe'],
+      equipment: ['household'], lengthenedEmphasis: true, repRange: [10,20], restSec: [45,90], loadType: 'bodyweight', unilateral: true, contraindications: ['ankle'],
+      alternatives: [], cues: ['Fußballen auf der Stufenkante, am Geländer festhalten', 'Tief in die Dehnung absenken, 1 s halten', 'Ganz hoch auf die Zehenspitzen'] }),
+  X({ id: 'reverse-crunch', name: 'Reverse Crunch (Beckenheben)', primary: ['abs'], secondary: [], home: true,
+      equipment: ['household'], repRange: [10,20], restSec: [45,90], loadType: 'bodyweight',
+      contraindications: ['lower_back'],
+      alternatives: ['dead-bug'], cues: ['Rückenlage, Knie gebeugt, Hände neben dem Körper', 'Becken einrollen und Knie Richtung Brust ziehen', 'Langsam Wirbel für Wirbel ablegen'] }),
+
   /* ---------------- KETTLEBELL (nur Aufwärmen/Core/Mobilität – zählt NICHT zum Volumen) ---------------- */
   X({ id: 'kb-swing', name: 'Kettlebell-Swing (leicht, Aufwärmen)', primary: ['glutes'], secondary: ['hamstrings'], equipment: ['kettlebells'],
       category: 'warmup', countsToVolume: false, loadType: 'kettlebell', repRange: [10,15],
@@ -1008,9 +1076,9 @@ const MOBILITY = [
   { id: 'mob-scap-pushup', name: 'Schulterblatt-Liegestütz', dose: '10 Wdh.', cue: 'Arme gestreckt (Hände auf Bank oder Boden), nur die Schulterblätter zusammen- und auseinanderschieben', avoid: ['wrist'] },
   { id: 'mob-scap-pullup', name: 'Schulterblatt-Klimmzug', dose: '8 Wdh.', cue: 'Mit gestreckten Armen hängen, Schultern aktiv nach unten ziehen – Füße dürfen den Boden berühren', equipment: ['pullup_bar'], avoid: ['shoulder'] },
   { id: 'mob-open-book', name: 'Brustwirbelsäulen-Rotation („Open Book“)', dose: 'je Seite 6 Wdh.', cue: 'Seitlich liegen, Knie angewinkelt, den oberen Arm weit aufdrehen und mit dem Blick folgen' },
-  { id: 'mob-leg-swing', name: 'Beinpendel', dose: 'je Bein 10 × vor/zurück und 10 × seitlich', cue: 'Am Rack festhalten, den Schwung langsam vergrößern' },
+  { id: 'mob-leg-swing', name: 'Beinpendel', dose: 'je Bein 10 × vor/zurück und 10 × seitlich', cue: 'An Rack oder Wand festhalten, den Schwung langsam vergrößern' },
   { id: 'mob-wgs', name: 'Ausfallschritt mit Rotation', dose: 'je Seite 5 Wdh.', cue: 'Tiefer Ausfallschritt, eine Hand innen am Boden, den anderen Arm zur Decke aufdrehen', avoid: ['knee'], alt: 'mob-hip-open' },
-  { id: 'mob-hip-open', name: 'Hüftöffner im Stand', dose: 'je Bein 6 Kreise nach außen', cue: 'Knie anheben und nach außen kreisen, am Rack festhalten' },
+  { id: 'mob-hip-open', name: 'Hüftöffner im Stand', dose: 'je Bein 6 Kreise nach außen', cue: 'Knie anheben und nach außen kreisen, an Rack oder Wand festhalten' },
   { id: 'mob-cat-cow', name: 'Katze-Kuh im Vierfüßlerstand', dose: '8 langsame Wdh.', cue: 'Rücken abwechselnd rund und lang machen – nur im schmerzfreien Bereich', avoid: ['knee','wrist'] }
 ];
 /* Kandidaten je Tagestyp in Präferenzreihenfolge (es werden 2–3 gewählt) */
@@ -1029,18 +1097,18 @@ const ACTIVATION = [
   { id: 'act-kb-halo', exId: 'kb-halo', region: 'upper', kb: 'light', dose: kg => `1 × 6 je Richtung (${kg} kg)`, avoid: ['shoulder'] },
   { id: 'act-bw-squat', name: 'Kniebeuge mit Körpergewicht', region: 'lower', dose: '10 langsame Wdh.', cue: 'Tief und kontrolliert, Fersen bleiben am Boden', avoid: ['knee'] },
   { id: 'act-bw-bridge', name: 'Hüftheben in Rückenlage (Glute Bridge)', region: 'lower', dose: '10 Wdh., oben kurz halten', cue: 'Gesäß anspannen, kein Hohlkreuz' },
-  { id: 'act-bw-pushup', name: 'Liegestütze an der Bank (erhöht)', region: 'upper', dose: '8 lockere Wdh.', cue: 'Hände auf der Bank, Körper gerade – nicht auslasten', equipment: ['flat_bench'], avoid: ['wrist','shoulder'] }
+  { id: 'act-bw-pushup', name: 'Liegestütze erhöht (Bank, Tisch oder Wand)', region: 'upper', dose: '8 lockere Wdh.', cue: 'Hände auf Bank, Tischkante oder an die Wand, Körper gerade – nicht auslasten', avoid: ['wrist','shoulder'] }
 ];
 /* Dehnungen für den Cooldown – gewählt nach den heute am stärksten trainierten Muskeln */
 const STRETCHES = [
-  { id: 'st-chest', name: 'Brustdehnung am Rack-Pfosten', muscles: ['chest','delts_front'], perSide: true, cue: 'Unterarm auf Schulterhöhe an Pfosten oder Türrahmen, Oberkörper sanft wegdrehen', avoid: ['shoulder'] },
-  { id: 'st-lats', name: 'Latdehnung im Stand', muscles: ['lats'], cue: 'Hände am Rack oder auf der Bank abstützen, Hüfte nach hinten schieben, Brust sinken lassen' },
+  { id: 'st-chest', name: 'Brustdehnung am Türrahmen', muscles: ['chest','delts_front'], perSide: true, cue: 'Unterarm auf Schulterhöhe an Türrahmen oder Rack-Pfosten, Oberkörper sanft wegdrehen', avoid: ['shoulder'] },
+  { id: 'st-lats', name: 'Latdehnung im Stand', muscles: ['lats'], cue: 'Hände an Rack, Bank oder Tischkante abstützen, Hüfte nach hinten schieben, Brust sinken lassen' },
   { id: 'st-upperback', name: 'Oberen Rücken rund machen', muscles: ['upperback'], cue: 'Hände vor dem Körper verschränken, weit nach vorne schieben, Schulterblätter auseinander' },
   { id: 'st-shoulder', name: 'Schulterdehnung quer vor der Brust', muscles: ['delts_side','delts_rear'], perSide: true, cue: 'Gestreckten Arm mit der anderen Hand sanft zur Brust ziehen, Schulter bleibt unten', avoid: ['shoulder'] },
   { id: 'st-triceps', name: 'Trizepsdehnung über Kopf', muscles: ['triceps'], perSide: true, cue: 'Hand zwischen die Schulterblätter, Ellbogen mit der anderen Hand sanft nach hinten ziehen', avoid: ['shoulder','elbow'] },
   { id: 'st-biceps', name: 'Bizepsdehnung an der Wand', muscles: ['biceps'], perSide: true, cue: 'Arm gestreckt, Handfläche auf Schulterhöhe an die Wand, Oberkörper langsam wegdrehen', avoid: ['elbow'] },
   { id: 'st-forearms', name: 'Unterarmdehnung', muscles: ['forearms'], perSide: true, cue: 'Arm gestreckt, Finger mit der anderen Hand sanft zurückziehen – Handfläche erst nach oben, dann nach unten', avoid: ['wrist','elbow'] },
-  { id: 'st-quads', name: 'Quadrizepsdehnung im Stand', muscles: ['quads'], perSide: true, cue: 'Am Rack festhalten, Ferse zum Gesäß, Knie zeigt nach unten, Becken leicht nach vorne', avoid: ['knee'], alt: 'st-hipflexor' },
+  { id: 'st-quads', name: 'Quadrizepsdehnung im Stand', muscles: ['quads'], perSide: true, cue: 'An Rack oder Wand festhalten, Ferse zum Gesäß, Knie zeigt nach unten, Becken leicht nach vorne', avoid: ['knee'], alt: 'st-hipflexor' },
   { id: 'st-hipflexor', name: 'Hüftbeuger-Dehnung in Schrittstellung', muscles: ['quads'], perSide: true, altOnly: true, cue: 'Große Schrittstellung, hinteres Bein lang, Becken nach vorne schieben, Oberkörper aufrecht' },
   { id: 'st-hamstrings', name: 'Beinbeuger-Dehnung an der Bank', muscles: ['hamstrings'], perSide: true, equipment: ['flat_bench'], cue: 'Ferse auf die Bank, Bein fast gestreckt, mit langem Rücken aus der Hüfte nach vorne neigen', avoid: ['lower_back'], alt: 'st-hamstrings-supine' },
   { id: 'st-hamstrings-supine', name: 'Beinbeuger-Dehnung in Rückenlage', muscles: ['hamstrings'], perSide: true, altOnly: true, cue: 'Bein gestreckt anheben, mit einem Handtuch hinter der Wade sanft heranziehen' },
@@ -1073,6 +1141,37 @@ const PATTERNS = {
   triceps:   ['overhead-ext-db','pushdown-rope','overhead-ext-ez','skullcrusher-ez','pushdown-bar','dips-triceps','pushup-close'],
   abs:       ['hanging-leg-raise','cable-crunch','crunch-weighted','ab-rollout','hanging-knee-raise','dead-bug','plank','pallof-press'],
   forearms:  ['wrist-curl-db','curl-reverse-ez','reverse-wrist-curl','farmer-walk-db','dead-hang']
+};
+
+/* Zuhause ohne Equipment: Körpergewicht + Haushalt (stabiler Stuhl/Sofa, schwerer Tisch, Handtuch, Türrahmen, Treppenstufe, Wand) */
+const HOME_EQUIPMENT = {
+  items: { household: true }, barbellKg: 20, lightBarbellKg: 10, ezBarKg: 10, dumbbellStepsKg: [], plates: {}, kettlebellsKg: [],
+  cableStepKg: 5, cableMaxKg: null, cableAdjustable: false, safetyArms: false, spotterAvailable: false, highPulleyStanding: false, improvisedWeightedBodyweight: false
+};
+/* Heim-Ersatz je Bewegungsmuster des Plans (Präferenzreihenfolge) */
+const HOME_PATTERNS = {
+  squat:     ['bulgarian-bw','squat-bw-tempo','wall-sit'],
+  lunge:     ['lunge-reverse-bw','bulgarian-bw','squat-bw-tempo'],
+  quad_iso:  ['wall-sit','squat-bw-tempo'],
+  hinge:     ['rdl-bw-single','hipthrust-single-bw','leg-curl-towel'],
+  hinge_uni: ['rdl-bw-single','leg-curl-towel'],
+  ham_curl:  ['nordic-sofa','leg-curl-towel'],
+  glute:     ['hipthrust-single-bw','glute-bridge-bw'],
+  calves:    ['calf-single-stair'],
+  h_push:    ['pushup-decline','pushup'],
+  i_push:    ['pushup-decline','pike-pushup','pushup'],
+  chest_iso: ['pushup','pushup-decline'],
+  v_push:    ['pike-pushup','pushup-decline'],
+  lateral:   ['lateral-door-iso'],
+  rear_delt: ['prone-yt-raise','row-doorframe'],
+  v_pull:    ['row-doorframe','lat-prone-pull','row-table'],
+  lat_iso:   ['lat-prone-pull','row-doorframe'],
+  h_pull:    ['row-table','row-doorframe'],
+  traps:     ['row-table','prone-yt-raise'],
+  biceps:    ['curl-towel','row-table'],
+  triceps:   ['pushup-close','dips-chair','triceps-ext-table'],
+  abs:       ['dead-bug','reverse-crunch','plank'],
+  forearms:  []
 };
 
 /* Wenn ein Muskel unter Ziel liegt: aus diesen Mustern wird eine Zusatzübung gewählt */
@@ -1814,14 +1913,25 @@ function attachWarmCool(day, eq, profile, budget) {
   day.cooldown = cooldownFor(day, eq, profile, budget);
 }
 /* ---------- Tagesform: Einschränkungen nur für die nächste Einheit (Plan bleibt unverändert) ----------
+   home: Zuhause ohne Equipment → jede Übung durch eine Heimübung für dasselbe Bewegungsmuster/denselben Muskel ersetzen
    regions: Beschwerden heute → kontraindizierte Übungen durch schonendere Alternative ersetzen, sonst weglassen
    muscles: Muskelgruppe heute auslassen → Übungen mit diesem Hauptmuskel entfallen */
 const TODAY_REGIONS = ['lower_back','knee','shoulder','elbow','wrist','ankle'];
-function hasDayLimits(l) { return !!(l && ((l.regions || []).length || (l.muscles || []).length)); }
+function hasDayLimits(l) { return !!(l && (l.home || (l.regions || []).length || (l.muscles || []).length)); }
+/* Heim-Kandidaten: erst passend zum Bewegungsmuster, dann gleicher Hauptmuskel */
+function homeCandidates(e, ex) {
+  const byMuscle = EXERCISES.filter(o => o.countsToVolume && ['compound', 'isolation'].includes(o.category) && o.primary[0] === ex.primary[0]).map(o => o.id);
+  return [...new Set([...(HOME_PATTERNS[e.pattern] || []), ...byMuscle])];
+}
 function adaptDay(day, limits, eq, profileInjuries, rx) {
+  const home = !!(limits && limits.home);
+  const useEq = home ? HOME_EQUIPMENT : eq;
   const regions = (limits && limits.regions) || [], skip = (limits && limits.muscles) || [];
   const injuries = [...new Set([...(profileInjuries || []), ...regions])];
   const used = new Set(day.entries.map(e => e.exId));
+  const ok = id => { const o = EX[id]; return allowedForSwap(id, useEq, injuries) && !(o.needsSpotter && !useEq.spotterAvailable) && !used.has(id) && !o.primary.some(m => skip.includes(m)); };
+  // Zuhause: nahe am Muskelversagen, sonst ist Körpergewicht zu leicht (Schoenfeld 2017) – außer im Deload
+  const rirFor = o => { const r = computeRIR(o, rx.week, rx.L, rx.deload, useEq); return home && !rx.deload ? Math.min(r, 2) : r; };
   const entries = [], changes = [];
   for (const e of day.entries) {
     const ex = EX[e.exId];
@@ -1829,17 +1939,20 @@ function adaptDay(day, limits, eq, profileInjuries, rx) {
     const skipped = ex.primary.filter(m => skip.includes(m));
     if (skipped.length) { changes.push({ kind: 'skip', uid: e.uid, from: e.exId, muscles: skipped }); continue; }
     const hit = (ex.contraindications || []).filter(c => regions.includes(c));
-    if (!hit.length) { entries.push(Object.assign({}, e)); continue; }
-    // Ersatz: gleicher Hauptmuskel und Kategorie bevorzugt, an Beschwerdetagen eher ohne schwere Langhantel (🔴 Praxis)
-    const rank = id => { const o = EX[id]; return (o.primary[0] !== ex.primary[0] ? 10 : 0) + (o.category !== ex.category ? 5 : 0) + (['barbell', 'barbell_light'].includes(o.loadType) ? 3 : 0) - (o.lengthenedEmphasis ? 1 : 0); };
-    const best = swapCandidates(e.exId, eq, injuries)
-      .filter(c => !c.restricted && !used.has(c.id) && !EX[c.id].primary.some(m => skip.includes(m)))
-      .map(c => c.id).sort((a, b) => rank(a) - rank(b))[0];
-    if (!best) { changes.push({ kind: 'drop', uid: e.uid, from: e.exId, regions: hit }); continue; }
+    const away = home && !isExerciseAvailable(ex, useEq);
+    if (!hit.length && !away) { entries.push(Object.assign({}, e, home ? { rir: rirFor(ex) } : {})); continue; }
+    let best;
+    if (home) best = homeCandidates(e, ex).find(ok);
+    else {
+      // Ersatz: gleicher Hauptmuskel und Kategorie bevorzugt, an Beschwerdetagen eher ohne schwere Langhantel (🔴 Praxis)
+      const rank = id => { const o = EX[id]; return (o.primary[0] !== ex.primary[0] ? 10 : 0) + (o.category !== ex.category ? 5 : 0) + (['barbell', 'barbell_light'].includes(o.loadType) ? 3 : 0) - (o.lengthenedEmphasis ? 1 : 0); };
+      best = swapCandidates(e.exId, eq, injuries).map(c => c.id).filter(ok).sort((a, b) => rank(a) - rank(b))[0];
+    }
+    if (!best) { changes.push({ kind: 'drop', uid: e.uid, from: e.exId, regions: hit, home: away }); continue; }
     used.add(best);
     const nx = EX[best];
-    entries.push(Object.assign({}, e, { exId: best, repRange: repRangeFor(nx, rx.strength), restSec: nx.restSec.slice(), rir: computeRIR(nx, rx.week, rx.L, rx.deload, eq) }));
-    changes.push({ kind: 'swap', uid: e.uid, from: e.exId, to: best, regions: hit });
+    entries.push(Object.assign({}, e, { exId: best, repRange: repRangeFor(nx, rx.strength), restSec: nx.restSec.slice(), rir: rirFor(nx) }));
+    changes.push({ kind: 'swap', uid: e.uid, from: e.exId, to: best, regions: hit, home: away });
   }
   // Supersätze nur behalten, wenn beide Partner bleiben und dafür geeignet sind
   entries.forEach(e => {
@@ -1859,7 +1972,9 @@ function adaptDay(day, limits, eq, profileInjuries, rx) {
     const c = changes.find(o => o.uid === e.uid); c.setsFrom = c.setsFrom || e.sets + 1; c.sets = e.sets;
   }
   out.estMin = Math.round(dayMinutes(out));
-  return { day: out, changes, injuries };
+  // Was wird zuhause gebraucht? (aus den gewählten Heimübungen)
+  const needs = home ? [...new Set(entries.flatMap(o => EX[o.exId].needs || []))] : [];
+  return { day: out, changes, injuries, eq: useEq, home, needs };
 }
 /* Ältere Pläne (ohne Cooldown) nachrüsten – Zeitschätzung inklusive */
 function refreshWarmCool(plan, profile, eq) {
@@ -2080,7 +2195,7 @@ function capSteps(ex, eq, extHi) {
   const steps = [{ key: 'reps', label: `Wiederholungsbereich nach oben erweitern (bis ${extHi} Wdh.) – nahe am Versagen weiterhin wirksam`, refs: ['schoenfeld2017load','morton2016'] },
                  { key: 'tempo', label: 'Langsameres Tempo (3–4 s absenken) und 1–2 s Pause in der gedehnten Position' }];
   if (!ex.unilateral) steps.push({ key: 'unilateral', label: okAlt(u) ? `Einseitige Variante: ${EX[u].name}` : 'Einseitige Ausführung, falls sinnvoll möglich', swapTo: okAlt(u) ? u : null });
-  if (!['barbell','barbell_light','ez'].includes(ex.loadType)) steps.push({ key: 'barbell', label: okAlt(b) ? `Langhantel-Variante: ${EX[b].name}${EX[b].needsSpotter && !eq.spotterAvailable ? ' (ohne Spotter nur RIR ≥ 3)' : ''}` : 'Langhantel-Variante derselben Bewegung (falls vorhanden)', swapTo: okAlt(b) ? b : null });
+  if (!['barbell','barbell_light','ez'].includes(ex.loadType) && (okAlt(b) || (eq.items && eq.items.barbell))) steps.push({ key: 'barbell', label: okAlt(b) ? `Langhantel-Variante: ${EX[b].name}${EX[b].needsSpotter && !eq.spotterAvailable ? ' (ohne Spotter nur RIR ≥ 3)' : ''}` : 'Langhantel-Variante derselben Bewegung (falls vorhanden)', swapTo: okAlt(b) ? b : null });
   if (ex.loadType === 'bodyweight' && ex.weightable && !eq.improvisedWeightedBodyweight) steps.push({ key: 'weight', label: 'Improvisierte Zusatzlast aktivieren (Profil → Equipment, z. B. Kurzhantel zwischen den Füßen)' });
   steps.push({ key: 'sets', label: 'Mehr Sätze innerhalb des Volumenkorridors (+1 Satz)' });
   return steps;
@@ -2096,6 +2211,8 @@ function suggestProgression(exId, presc, history, eq, opt = {}) {
   }
   const sessions = (history || []).filter(h => h.sets && h.sets.length);
   if (!sessions.length) {
+    if (ex.loadType === 'bodyweight' && !(ex.weightable && eq.improvisedWeightedBodyweight)) return { kind: 'start', weight: null, reps: [lo, hi], title: 'Einstieg finden',
+      text: `Schaff ${lo}–${hi} saubere ${u} mit etwa ${tRIR} RIR. Zu leicht? Langsamer absenken (3 s) oder die schwerere Variante aus den Technik-Hinweisen – zu schwer? Die leichtere.` };
     return { kind: 'start', weight: null, reps: [lo, hi], title: 'Startgewicht finden',
       text: `Wähle ein Gewicht, mit dem du ${lo}–${hi} saubere ${u} mit etwa ${tRIR} RIR schaffst. Lieber etwas leichter beginnen und in der nächsten Einheit anpassen.` };
   }
@@ -2514,18 +2631,23 @@ function testDayLimits(errors) {
           const ex = EX[e.exId];
           if (isContraindicated(ex, limits.regions)) E(`${label}: ${e.exId} trotz ${limits.regions.join('/')}`);
           if (ex.primary.some(m => limits.muscles.includes(m))) E(`${label}: ${e.exId} trotz ausgelassener Muskelgruppe`);
-          if (!isExerciseAvailable(ex, eq)) E(`${label}: ${e.exId} nicht durchführbar`);
+          if (!isExerciseAvailable(ex, r.eq)) E(`${label}: ${e.exId} ${limits.home ? 'zuhause ohne Equipment' : ''} nicht durchführbar`);
+          if (limits.home && !rx.deload && e.rir > 2) E(`${label}: ${e.exId} zuhause mit RIR ${e.rir} (> 2)`);
           if (ex.needsSpotter && !eq.spotterAvailable) E(`${label}: ${e.exId} braucht Spotter`);
           if (e.superset && r.day.entries.filter(o => o.superset === e.superset).length !== 2) E(`${label}: Supersatz ohne Partner`);
         });
         if (r.day.estMin > Math.max(plan.sessionMin, d.estMin) + 1 && r.day.entries.some(e => e.sets > 2 && r.changes.some(c => c.kind === 'swap' && c.uid === e.uid))) E(`${label}: Zeitbudget überschritten (${r.day.estMin} Min)`);
-        const cd = cooldownFor(r.day, eq, { injuries: r.injuries }, 60), wu = warmupFor(r.day, eq, { injuries: r.injuries }, 60);
-        cd.filter(x => x.phase === 'stretch').forEach(x => { if (!wcAllowed(STR[x.id], eq, r.injuries)) E(`${label}: Dehnung ${x.id} trotz Beschwerde`); });
+        const cd = cooldownFor(r.day, r.eq, { injuries: r.injuries }, 60), wu = warmupFor(r.day, r.eq, { injuries: r.injuries }, 60);
+        cd.filter(x => x.phase === 'stretch').forEach(x => { if (!wcAllowed(STR[x.id], r.eq, r.injuries)) E(`${label}: Dehnung ${x.id} trotz Beschwerde/ohne Equipment`); });
         if (wu.some(x => x.id === 'pulse-jump') && !wcAllowed(PULSE.jump, eq, r.injuries)) E(`${label}: Springen trotz Beschwerde`);
-        wu.filter(x => ['mobility', 'activation'].includes(x.phase)).forEach(x => { if (!wcAllowed(MOB[x.id] || ACT[x.id], eq, r.injuries)) E(`${label}: Aufwärmen ${x.id} trotz Beschwerde`); });
+        wu.filter(x => ['mobility', 'activation'].includes(x.phase)).forEach(x => { if (!wcAllowed(MOB[x.id] || ACT[x.id], r.eq, r.injuries)) E(`${label}: Aufwärmen ${x.id} trotz Beschwerde/ohne Equipment`); });
         return r;
       };
       TODAY_REGIONS.forEach(reg => check({ regions: [reg], muscles: [] }, `${days} Tage T${di + 1} ${reg}`));
+      // Zuhause ohne Equipment – allein und kombiniert mit jeder Beschwerde
+      const h = check({ home: true, regions: [], muscles: [] }, `${days} Tage T${di + 1} zuhause`);
+      if (h.day.entries.length < Math.min(3, d.entries.length)) E(`${days} Tage T${di + 1} zuhause: nur ${h.day.entries.length} Übungen`);
+      TODAY_REGIONS.forEach(reg => check({ home: true, regions: [reg], muscles: [] }, `${days} Tage T${di + 1} zuhause+${reg}`));
       [...new Set(d.entries.flatMap(e => EX[e.exId].primary))].forEach(m => check({ regions: [], muscles: [m] }, `${days} Tage T${di + 1} ohne ${m}`));
       if (d.entries.some(e => e.exId === 'squat-bb')) {
         squatSeen = true;
@@ -2535,6 +2657,14 @@ function testDayLimits(errors) {
     });
   });
   if (!squatSeen) E('Testfall Kniebeuge nicht gefunden');
+  // Heimübungen: nur im Heim-Modus verfügbar, Muster-Verweise gültig, keine Langhantel-Stufe in der Progression
+  EXERCISES.filter(x => x.home).forEach(x => {
+    if (isExerciseAvailable(x, eq)) E(`${x.id}: Heimübung im Kraftraum-Plan verfügbar`);
+    if (!isExerciseAvailable(x, HOME_EQUIPMENT)) E(`${x.id}: Heimübung zuhause nicht verfügbar`);
+  });
+  Object.values(HOME_PATTERNS).flat().forEach(id => { if (!EX[id] || !isExerciseAvailable(EX[id], HOME_EQUIPMENT)) E(`Heim-Muster verweist auf ${id} (unbekannt oder nicht ohne Equipment)`); });
+  const pr = suggestProgression('bulgarian-bw', { repRange: [8, 20], rir: 1, sets: 3 }, [{ sets: [{ w: 0, reps: 20, rir: 1 }, { w: 0, reps: 20, rir: 1 }, { w: 0, reps: 20, rir: 1 }] }], HOME_EQUIPMENT, { bodyKg: 80 });
+  if (pr.kind !== 'cap' || pr.steps.some(x => x.key === 'barbell' || x.key === 'weight')) E('Heim-Progression schlägt Langhantel/Zusatzlast vor');
 }
 /* Selbsttest: Pläne aus älteren Versionen bekommen Aufwärmen & Cooldown nachgerüstet (idempotent) */
 function testWarmCoolMigration(errors) {
@@ -3017,17 +3147,19 @@ function viewToday() {
   const li = (left, right, cls = '') => `<li class="row between ${cls}" style="padding:4px 0;border-bottom:1px solid var(--border)">${left}<span class="muted tnum small">${right}</span></li>`;
   const entryRow = e => {
     const c = ad && ad.changes.find(x => x.uid === e.uid);
-    if (c && c.kind !== 'swap') return li(`<span class="muted" style="text-decoration:line-through">${esc(EX[e.exId].name)}</span>`, 'entfällt heute');
+    if (c && c.kind !== 'swap') return li(`<span class="muted" style="text-decoration:line-through">${esc(EX[e.exId].name)}</span>`, c.home && !(c.regions || []).length ? 'entfällt – zuhause nicht möglich' : 'entfällt heute');
     const a = (ad && ad.day.entries.find(x => x.uid === e.uid)) || e, ex = EX[a.exId];
     return li(`<span>${a.superset ? `<span class="ss-tag">${a.superset}</span> ` : ''}${esc(ex.name)}${c ? `<br><span class="muted small">statt ${esc(EX[c.from].name)}</span>` : ''}</span>`, `${a.sets} × ${a.repRange[0]}–${a.repRange[1]} · RIR ${a.rir}`);
   };
   return `<h1>Heute</h1>
   <div class="card">
     <div class="card-head"><div><div class="muted small">Block ${plan.blockIndex + 1} · Woche ${nx.week + 1} von ${plan.weeks.length} · Einheit ${nx.day + 1}/${wk.days.length}</div>
-    <h2 style="margin-top:4px">${esc(day.name)} ${wk.deload ? '<span class="chip accent">Deload</span>' : ''}${ad && ad.changes.length ? ' <span class="chip warn">heute angepasst</span>' : ''}</h2></div>
+    <h2 style="margin-top:4px">${esc(day.name)} ${wk.deload ? '<span class="chip accent">Deload</span>' : ''}${ad && ad.home ? ' <span class="chip accent">zuhause</span>' : ''}${ad && ad.changes.some(c => c.kind === 'skip' || (c.regions || []).length) ? ' <span class="chip warn">heute angepasst</span>' : ''}</h2></div>
     <span class="chip">${WEEKDAYS[day.weekday]} empfohlen</span></div>
     <div class="progress" aria-label="Blockfortschritt ${Math.round(doneS / totalS * 100)} %"><span style="width:${Math.round(doneS / totalS * 100)}%"></span></div>
+    <fieldset style="margin:12px 0 4px"><legend class="small muted" style="font-weight:600">Wo trainierst du heute?</legend>${segRadio('place', [{ v: 'gym', l: 'Kraftraum' }, { v: 'home', l: 'Zuhause' }], lim && lim.home ? 'home' : 'gym', 'data-place="1" aria-describedby="placeHint"')}<div class="hint" id="placeHint">Zuhause = ohne Equipment, nur mit Körpergewicht und Möbeln</div></fieldset>
     <p class="meta" style="margin-top:8px">ca. ${shown.estMin} Min inkl. Aufwärmen & Cooldown · ${shown.entries.length} Übungen · ${shown.entries.reduce((a, e) => a + e.sets, 0)} Arbeitssätze</p>
+    ${ad && ad.home ? homeNotice(ad) : ''}
     <ul class="clean" style="margin:10px 0">${todayWcRow('Aufwärmen', day.warmMin, day.warmup)}${day.entries.map(entryRow).join('')}${todayWcRow('Cooldown', day.coolMin, day.cooldown)}</ul>
     ${dayLimitPanel(day, lim, ad, ci)}
     ${hint}
@@ -3049,6 +3181,14 @@ function todayWcRow(label, min, items) {
   if (!min || !items || !items.length) return '';
   return `<li class="row between" style="padding:4px 0;border-bottom:1px solid var(--border)"><span class="muted">${label}</span><span class="muted tnum small">ca. ${min} Min</span></li>`;
 }
+/* Hinweis zur Heim-Einheit: was sie ausmacht und was man braucht */
+function homeNotice(ad) {
+  const dropped = ad.changes.filter(c => c.kind === 'drop' && c.home).map(c => muscleList(EX[c.from].primary));
+  return `<div class="notice info"><strong>Heim-Einheit mit Körpergewicht</strong>Jede Übung ist durch eine Heimvariante für denselben Muskel ersetzt. Mit Körpergewicht zählt die Nähe zum Muskelversagen: Wiederholungen bis RIR 0–2, langsam absenken – so wirken auch leichte Lasten ähnlich gut für den Muskelaufbau. ${evBtn('green', 'k-load', 'Evidenz')}
+    ${ad.needs.length ? `<div class="small" style="margin-top:6px"><strong>Du brauchst:</strong> ${esc(ad.needs.join(', '))}</div>` : ''}
+    ${dropped.length ? `<div class="small" style="margin-top:4px">Ohne Equipment kaum sinnvoll trainierbar und daher heute weggelassen: ${esc([...new Set(dropped)].join(', '))}.</div>` : ''}
+    <div class="small" style="margin-top:4px">Gilt nur für diese eine Einheit – dein Kraftraum-Plan bleibt unverändert, die Einheit zählt aber als erledigt.</div></div>`;
+}
 function rxFor(plan, wk) {
   return { week: wk.index != null ? wk.index : plan.weeks.indexOf(wk), L: plan.mesoLength, deload: !!wk.deload, strength: !!(state.profile && state.profile.strengthSecondary), budget: Number(plan.sessionMin) || 60 };
 }
@@ -3057,21 +3197,21 @@ function dayLimitPanel(day, lim, ad, ci) {
   const regs = (lim && lim.regions) || [], mus = (lim && lim.muscles) || [];
   const dayMuscles = [...new Set(day.entries.flatMap(e => (EX[e.exId] ? EX[e.exId].primary : [])))].filter(m => MUSCLES[m] && MUSCLES[m].f != null);
   const muscleOpts = [...new Set([...dayMuscles, ...mus])];
-  const open = ui.limOpen != null ? ui.limOpen : !!(lim || (ci && ci.joints <= 2));
+  const open = ui.limOpen != null ? ui.limOpen : !!(regs.length || mus.length || (ci && ci.joints <= 2));
   const n = k => (ad ? ad.changes.filter(c => (k === 'swap' ? c.kind === 'swap' : c.kind !== 'swap')).length : 0);
-  const status = lim ? [regs.length ? 'Beschwerden: ' + regs.map(r => INJURIES[r]).join(', ') : '', mus.length ? 'ohne ' + muscleList(mus) : ''].filter(Boolean).join(' · ') : 'Schmerzen oder Muskelgruppe auslassen';
+  const status = regs.length || mus.length ? [regs.length ? 'Beschwerden: ' + regs.map(r => INJURIES[r]).join(', ') : '', mus.length ? 'ohne ' + muscleList(mus) : ''].filter(Boolean).join(' · ') : 'Schmerzen oder Muskelgruppe auslassen';
   const box = (k, v, label) => `<label><input type="checkbox" id="lim-${k}-${v}" data-lim="${k}" value="${v}" ${(k === 'regions' ? regs : mus).includes(v) ? 'checked' : ''}><span>${esc(label)}</span></label>`;
   return `<details class="limit-box" data-details="limOpen" ${open ? 'open' : ''}>
     <summary><strong>Heute eingeschränkt?</strong> <span class="muted small">${esc(status)}</span></summary>
-    ${ci && ci.joints <= 2 && !lim ? '<p class="small" style="margin:0 0 8px">Dein Check-in meldet Gelenkbeschwerden – markiere hier, was heute schmerzt.</p>' : ''}
+    ${ci && ci.joints <= 2 && !regs.length ? '<p class="small" style="margin:0 0 8px">Dein Check-in meldet Gelenkbeschwerden – markiere hier, was heute schmerzt.</p>' : ''}
     <fieldset><legend>Beschwerden heute</legend><div class="seg">${TODAY_REGIONS.map(r => box('regions', r, INJURIES[r])).join('')}</div>
       <div class="hint">Übungen, die diese Stelle belasten, ersetzt die App für heute durch eine schonendere Alternative für denselben Muskel – gibt es keine, entfällt die Übung.</div></fieldset>
     <fieldset><legend>Muskelgruppe heute auslassen</legend><div class="seg">${muscleOpts.map(m => box('muscles', m, MUSCLES[m].short)).join('')}</div>
       <div class="hint">z. B. bei starkem Muskelkater oder einer Zerrung – Übungen mit diesem Hauptmuskel entfallen heute.</div></fieldset>
-    ${ad ? `<p class="small" style="margin:0 0 8px"><strong>${n('swap')} ersetzt, ${n('drop')} ${n('drop') === 1 ? 'entfällt' : 'entfallen'}</strong> – siehe Liste oben.${ad.changes.some(c => c.sets) ? ' Einseitige Ersatzübungen haben 1 Satz weniger, damit die Zeit passt.' : ''}</p>` : ''}
+    ${ad && (regs.length || mus.length) ? `<p class="small" style="margin:0 0 8px"><strong>${n('swap')} ersetzt, ${n('drop')} ${n('drop') === 1 ? 'entfällt' : 'entfallen'}</strong> – siehe Liste oben.${ad.changes.some(c => c.sets) ? ' Einseitige Ersatzübungen haben 1 Satz weniger, damit die Zeit passt.' : ''}</p>` : ''}
     ${ad && !ad.day.entries.length ? '<div class="notice warn"><strong>Heute bleibt keine Übung übrig</strong>Wähle eine andere Einheit oder gönn dir einen Ruhetag.</div>' : ''}
     ${regs.length ? '<div class="notice warn small"><strong>Nur schmerzfrei trainieren</strong>Tut es auch mit der Alternative weh, lass die Übung weg. Bei starken, ausstrahlenden oder mehrere Tage anhaltenden Schmerzen bitte ärztlich oder physiotherapeutisch abklären.</div>' : ''}
-    <div class="row between"><p class="hint" style="margin:0;flex:1">Gilt nur für die nächste Einheit${lim && lim.date && lim.date !== todayISO() ? ` (eingetragen am ${fmtDate(lim.date, { weekday: 'short', day: '2-digit', month: '2-digit' })})` : ''} – dein Plan bleibt unverändert. Dauerhafte Beschwerden trägst du unter Profil → Bearbeiten ein.</p>${lim ? '<button type="button" class="btn sm" data-action="lim-reset">Zurücksetzen</button>' : ''}</div>
+    <div class="row between"><p class="hint" style="margin:0;flex:1">Gilt nur für die nächste Einheit${lim && lim.date && lim.date !== todayISO() ? ` (eingetragen am ${fmtDate(lim.date, { weekday: 'short', day: '2-digit', month: '2-digit' })})` : ''} – dein Plan bleibt unverändert. Dauerhafte Beschwerden trägst du unter Profil → Bearbeiten ein.</p>${regs.length || mus.length ? '<button type="button" class="btn sm" data-action="lim-reset">Zurücksetzen</button>' : ''}</div>
   </details>`;
 }
 function restHint(day) {
@@ -3132,11 +3272,12 @@ function blockAdaptation(plan) {
    UI · Workout-Modus (Logger)
    ===================================================================== */
 function showWeightInput(ex) { return ex.loadType !== 'bodyweight' || (ex.weightable && state.equipment.improvisedWeightedBodyweight); }
-function makeActiveExercise(entry, deload) {
+function activeEq(a) { return a && a.home ? HOME_EQUIPMENT : state.equipment; }
+function makeActiveExercise(entry, deload, eq = state.equipment) {
   const ex = EX[entry.exId];
   const planned = { sets: entry.sets, repRange: entry.repRange.slice(), rir: entry.rir, restSec: entry.restSec.slice(), superset: entry.superset || null, deload: !!deload };
   const hist = exerciseHistory(entry.exId).filter(h => !h.deload);
-  const sugg = suggestProgression(entry.exId, planned, hist, state.equipment, { bodyKg: bodyWeight() });
+  const sugg = suggestProgression(entry.exId, planned, hist, eq, { bodyKg: bodyWeight() });
   const lastW = hist.length ? typicalWeight(hist[hist.length - 1].sets) : null;
   const w0 = sugg.weight != null ? sugg.weight : (lastW != null ? lastW : (ex.loadType === 'bodyweight' ? 0 : ''));
   return {
@@ -3153,17 +3294,19 @@ function startWorkout(w, d) {
   const ad = lim ? adaptDay(planDay, lim, state.equipment, inj0, rxFor(plan, wk)) : null;
   if (ad && !ad.day.entries.length) { toast('Mit deinen heutigen Einschränkungen bleibt keine Übung übrig – wähle eine andere Einheit oder mach einen Ruhetag.'); return; }
   const day = ad ? ad.day : planDay;
+  const eq = ad ? ad.eq : state.equipment;
   const prof = Object.assign({}, state.profile, { injuries: ad ? ad.injuries : inj0 });
-  // Aufwärmen/Cooldown frisch aus aktuellem Equipment und Profil (Plan-Version als Rückfall)
+  // Aufwärmen/Cooldown frisch aus Equipment des Trainingsorts und Profil (Plan-Version als Rückfall)
   let warmup = planDay.warmup || [], cooldown = planDay.cooldown || [];
-  try { warmup = warmupFor(day, state.equipment, prof, budget); cooldown = cooldownFor(day, state.equipment, prof, budget); } catch (e) { /* Plan-Version nutzen */ }
+  try { warmup = warmupFor(day, eq, prof, budget); cooldown = cooldownFor(day, eq, prof, budget); } catch (e) { /* Plan-Version nutzen */ }
   state.active = {
     id: uidGen('l'), startedAt: new Date().toISOString(), planId: plan.id, blockIndex: plan.blockIndex,
     week: w, day: d, dayName: planDay.name, deload: !!wk.deload, notes: '',
     warmup, cooldown, warmMin: planDay.warmMin || warmupMinutes(budget), coolMin: planDay.coolMin || cooldownMinutes(budget), wcDone: {},
     prevention: planDay.prevention || [],
-    limits: ad ? { regions: (lim.regions || []).slice(), muscles: (lim.muscles || []).slice(), changes: ad.changes } : null,
-    exercises: day.entries.map(e => makeActiveExercise(e, wk.deload))
+    home: !!(ad && ad.home),
+    limits: ad ? { home: !!ad.home, regions: (lim.regions || []).slice(), muscles: (lim.muscles || []).slice(), changes: ad.changes, needs: ad.needs } : null,
+    exercises: day.entries.map(e => makeActiveExercise(e, wk.deload, eq))
   };
   ui.wuOpen = null;
   save(true); ensureAudio(); requestWakeLock(); render();
@@ -3192,9 +3335,12 @@ function wcChecklist(part, items) {
 }
 /* Hinweis im Training: was heute wegen Beschwerden/ausgelassener Muskelgruppe angepasst wurde */
 function limitsNotice(l) {
-  const parts = (l.changes || []).map(c => c.kind === 'swap' ? `${EX[c.to].name} statt ${EX[c.from].name}` : `${EX[c.from].name} entfällt`);
-  const head = [(l.regions || []).length ? 'Beschwerden: ' + l.regions.map(r => INJURIES[r]).join(', ') : '', (l.muscles || []).length ? 'ohne ' + muscleList(l.muscles) : ''].filter(Boolean).join(' · ');
-  return `<div class="notice ${(l.regions || []).length ? 'warn' : 'info'}"><strong>Heute angepasst – ${esc(head)}</strong>${parts.length ? esc(parts.join(' · ')) + '. ' : ''}${(l.regions || []).length ? 'Nur schmerzfrei trainieren – tut eine Übung weh, lass sie weg.' : ''}</div>`;
+  const ch = l.changes || [];
+  // Zuhause wird fast alles ersetzt → nur Anzahl nennen, Wegfälle einzeln
+  const parts = l.home ? [ch.filter(c => c.kind === 'swap').length + ' Übungen durch Heimvarianten ersetzt', ...ch.filter(c => c.kind !== 'swap').map(c => `${EX[c.from].name} entfällt`)]
+    : ch.map(c => c.kind === 'swap' ? `${EX[c.to].name} statt ${EX[c.from].name}` : `${EX[c.from].name} entfällt`);
+  const head = [l.home ? 'Zuhause ohne Equipment' : '', (l.regions || []).length ? 'Beschwerden: ' + l.regions.map(r => INJURIES[r]).join(', ') : '', (l.muscles || []).length ? 'ohne ' + muscleList(l.muscles) : ''].filter(Boolean).join(' · ');
+  return `<div class="notice ${(l.regions || []).length ? 'warn' : 'info'}"><strong>Heute angepasst – ${esc(head)}</strong>${parts.length ? esc(parts.join(' · ')) + '. ' : ''}${l.home ? 'Körpergewicht bis nahe ans Muskelversagen (RIR 0–2), langsam absenken. ' : ''}${(l.regions || []).length ? 'Nur schmerzfrei trainieren – tut eine Übung weh, lass sie weg.' : ''}${(l.needs || []).length ? ` Du brauchst: ${esc(l.needs.join(', '))}.` : ''}</div>`;
 }
 function viewWorkout() {
   const a = state.active;
@@ -3338,7 +3484,7 @@ function finishWorkout(force) {
     prs: []
   };
   a.exercises.forEach(x => x.sets.forEach(s => { if (s.done && s.pr) log.prs.push({ exId: x.exId, e1rm: setE1RM(EX[x.exId], s, bodyWeight()) }); }));
-  if (a.limits) { log.limits = { regions: a.limits.regions, muscles: a.limits.muscles }; state.dayLimits = null; } // Tagesform-Einschränkung ist damit verbraucht
+  if (a.limits) { log.limits = { home: !!a.limits.home, regions: a.limits.regions, muscles: a.limits.muscles }; state.dayLimits = null; } // Tagesform-Einschränkung ist damit verbraucht
   state.logs.push(log);
   if (state.plan && state.plan.id === a.planId) state.plan.done[sessionKey(a.week, a.day)] = log.id;
   const coolLeft = (a.cooldown || []).filter((c, k) => !(a.wcDone || {})['cool' + k]);
@@ -3475,14 +3621,16 @@ function applyPlanSwap(uid, newId) {
   plan.swaps = plan.swaps || {}; plan.swaps[uid] = newId;
 }
 function openSwap(ctx) {
-  const eq = state.equipment, inj = (state.profile && state.profile.injuries) || [];
+  const inWorkout = ctx.kind === 'workout', a = state.active;
+  const eq = inWorkout ? activeEq(a) : state.equipment;
+  const inj = [...new Set([...((state.profile && state.profile.injuries) || []), ...((inWorkout && a.limits && a.limits.regions) || [])])];
   const curId = ctx.kind === 'workout' ? state.active.exercises[ctx.x].exId : ctx.exId;
   const cands = swapCandidates(curId, eq, inj);
   const cur = EX[curId];
   ui.swapCtx = ctx;
   openDialog(`${closeBtn()}<h2 id="dlgTitle">Übung ersetzen</h2>
-    <p class="muted small">Aktuell: <strong>${esc(cur.name)}</strong> (${esc(muscleList(cur.primary))}). Nur Übungen, die mit deinem Equipment und deinen Einschränkungen möglich sind.</p>
-    ${ctx.kind === 'workout' && state.active.planId === (state.plan && state.plan.id) ? `<label class="switch"><span class="sw-text">Auch im Plan für den restlichen Block ersetzen</span><input type="checkbox" id="swapPlan" checked></label>` : ''}
+    <p class="muted small">Aktuell: <strong>${esc(cur.name)}</strong> (${esc(muscleList(cur.primary))}). Nur Übungen, die ${inWorkout && a.home ? 'zuhause ohne Equipment' : 'mit deinem Equipment'} und mit deinen Einschränkungen möglich sind.</p>
+    ${inWorkout && !a.home && a.planId === (state.plan && state.plan.id) ? `<label class="switch"><span class="sw-text">Auch im Plan für den restlichen Block ersetzen</span><input type="checkbox" id="swapPlan" checked></label>` : ''}
     ${cands.length ? `<ul class="clean">${cands.map(c => { const ex = EX[c.id]; return `<li style="border-top:1px solid var(--border);padding:10px 0"><div class="row between"><div><strong>${esc(ex.name)}</strong><div class="meta">${esc(muscleList(ex.primary))} · ${ex.category === 'compound' ? 'Grundübung' : 'Isolation'} · ${ex.repRange[0]}–${ex.repRange[1]} ${unitLabel(ex)}${ex.lengthenedEmphasis ? ' · gedehnte Position' : ''}</div>${c.restricted ? '<div class="small" style="color:var(--warn);font-weight:600">Ohne Spotter/Sicherungsarme nur mit RIR ≥ 3</div>' : ''}</div>
       <button type="button" class="btn sm primary" data-action="swap-to" data-id="${c.id}">Wählen</button></div></li>`; }).join('')}</ul>` : '<p>Keine passende Alternative verfügbar.</p>'}`);
 }
@@ -3494,11 +3642,11 @@ function doSwap(newId) {
     toast(`Ersetzt durch ${EX[newId].name} (alle Wochen).`);
   } else {
     const a = state.active, x = a.exercises[ctx.x];
-    const alsoPlan = ctx.alsoPlan || (document.getElementById('swapPlan') ? document.getElementById('swapPlan').checked : false);
+    const alsoPlan = !a.home && (ctx.alsoPlan || (document.getElementById('swapPlan') ? document.getElementById('swapPlan').checked : false)); // Heim-Einheit ändert den Kraftraum-Plan nie
     if (alsoPlan && state.plan) applyPlanSwap(x.uid, newId);
     const entry = { uid: x.uid, exId: newId, sets: x.sets.length, repRange: repRangeFor(EX[newId], state.profile && state.profile.strengthSecondary), restSec: EX[newId].restSec.slice(),
-      rir: computeRIR(EX[newId], a.week, state.plan ? state.plan.mesoLength : 6, a.deload, state.equipment), superset: x.planned.superset };
-    const nx = makeActiveExercise(entry, a.deload);
+      rir: (r => (a.home && !a.deload ? Math.min(r, 2) : r))(computeRIR(EX[newId], a.week, state.plan ? state.plan.mesoLength : 6, a.deload, activeEq(a))), superset: x.planned.superset };
+    const nx = makeActiveExercise(entry, a.deload, activeEq(a));
     nx.notes = x.notes;
     a.exercises[ctx.x] = nx;
     toast(`Ersetzt durch ${EX[newId].name}.`);
@@ -3984,7 +4132,7 @@ const ACTIONS = {
   'plates-open': el => { if (!state.active) return; const x = state.active.exercises[Number(el.dataset.x)]; const s = x.sets.find(v => !v.done && v.w !== '') || x.sets[0]; openPlates(parseNum(s && s.w), x.exId); },
   'pc-set': el => { document.getElementById('pcKg').value = String(el.dataset.v).replace('.', ','); updatePlates(); },
   'timer-start': el => { if (!state.active) return; ensureAudio(); const x = state.active.exercises[Number(el.dataset.x)]; startTimer(Math.round((x.planned.restSec[0] + x.planned.restSec[1]) / 2) + (state.settings.restAdjust || 0), EX[x.exId].name); },
-  'lim-reset': () => { state.dayLimits = null; save(); render(); toast('Einschränkung für heute zurückgesetzt.'); },
+  'lim-reset': () => { const home = state.dayLimits && state.dayLimits.home; state.dayLimits = home ? { home: true, regions: [], muscles: [], date: todayISO() } : null; save(); render(); toast('Einschränkung für heute zurückgesetzt.'); },
   'wc-toggle': el => { if (!state.active) return; const a = state.active, k = el.dataset.id + el.dataset.x; a.wcDone = a.wcDone || {}; a.wcDone[k] = !a.wcDone[k]; save(); render(); },
   'wc-timer': el => {
     if (!state.active) return;
@@ -4045,6 +4193,13 @@ function onChange(e) {
       render();
     }
     state.onboardingDraft = ob; save();
+    return;
+  }
+  if (el.dataset.place) {
+    const l = state.dayLimits || { regions: [], muscles: [] };
+    l.home = el.value === 'home'; l.date = todayISO();
+    state.dayLimits = hasDayLimits(l) ? l : null;
+    save(); render(); toast(l.home ? 'Heute zuhause: Die Einheit ist auf Körpergewicht umgestellt.' : 'Heute im Kraftraum: Einheit wie geplant.');
     return;
   }
   if (el.dataset.lim) {
