@@ -231,7 +231,7 @@ body.ob-mode .tabbar { display:none; }
 .field { margin-bottom:14px; }
 .field > label, .field > .label, fieldset > legend { display:block; font-weight:650; margin-bottom:8px; font-size:.95rem; }
 .hint { color:var(--text-2); font-size:.86rem; margin-top:6px; }
-input[type=text], input[type=number], input[type=date], input:not([type]), select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=password], input:not([type]), select, textarea {
   font:inherit; color:var(--text); background:var(--surface); border:1px solid var(--border-strong);
   border-radius:12px; min-height:46px; padding:9px 13px; width:100%;
   transition:border-color .15s, box-shadow .15s;
@@ -3084,6 +3084,7 @@ function runSelfTest(opts = {}) {
   });
   testProgression(errors); testPlates(errors); testInjuryFilter(errors); testEquipmentOnly(errors);
   if (typeof testExportImport === 'function') testExportImport(errors);
+  if (typeof testSyncMerge === 'function') testSyncMerge(errors);
   if (typeof testWarmCoolMigration === 'function') testWarmCoolMigration(errors);
   if (!boot && typeof testDayLimits === 'function') testDayLimits(errors);
   if (!boot) { testSport(errors, full); testTimeBudget(errors); }
@@ -3145,15 +3146,16 @@ function loadState() {
   }
 }
 let _saveTimer = null;
+function persistLocal() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); storageState.ok = true; }
+  catch (e) {
+    storageState.ok = false;
+    if (!storageState.warned && typeof toast === 'function') { storageState.warned = true; toast('Speichern fehlgeschlagen (Speicher voll oder blockiert). Bitte exportiere ein Backup.'); }
+  }
+}
 function save(now) {
   clearTimeout(_saveTimer);
-  const run = () => {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); storageState.ok = true; }
-    catch (e) {
-      storageState.ok = false;
-      if (!storageState.warned && typeof toast === 'function') { storageState.warned = true; toast('Speichern fehlgeschlagen (Speicher voll oder blockiert). Bitte exportiere ein Backup.'); }
-    }
-  };
+  const run = () => { _saveTimer = null; persistLocal(); syncChanged(); };
   if (now) run(); else _saveTimer = setTimeout(run, 250);
 }
 function exportPayload() {
@@ -3252,6 +3254,235 @@ function testWarmCoolMigration(errors) {
   if (!Array.isArray(d0.cooldown) || d0.coolMin !== 3 || !d0.warmup.some(x => x.phase === 'pulse')) errors.push('Migration: alter Plan ohne Aufwärmen/Cooldown nicht ergänzt');
   if (d0.warmup.some(x => x.id === 'pulse-jump')) errors.push('Migration: Knie-Einschränkung beim Aufwärmen ignoriert');
   if (stableStringify(migrate(JSON.parse(JSON.stringify(m)))) !== stableStringify(m)) errors.push('Migration: nicht idempotent');
+}
+
+/* ---------- Online-Sync (optional) über ein geheimes Gist im GitHub-Konto des Nutzers ----------
+   Der ganze Stand liegt als eine JSON-Datei (Exportformat + rev/savedAt) im Gist; Zugang über einen
+   GitHub-Token mit dem Recht „gist“. Token und Sync-Zustand liegen getrennt unter SYNC_KEY – nie im
+   Export und nie im Gist selbst.
+   Jeder Upload bekommt eine Revisions-ID (rev). Hat ein anderes Gerät seit dem letzten Abgleich (baseRev)
+   hochgeladen, wird dessen Stand übernommen – oder, wenn hier ebenfalls Änderungen offen sind (dirty),
+   mit dem lokalen Stand zusammengeführt (mergeStates), sodass keine Trainings verloren gehen. */
+const SYNC_KEY = 'muskelplan.sync';
+const SYNC_API = 'https://api.github.com';
+const SYNC_FILE = 'muskelplan-sync.json';
+const SYNC_TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=gist&description=Muskelplan%20Sync';
+function loadSyncMeta() {
+  try { const m = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); return m && m.token && m.gistId ? m : null; }
+  catch (e) { return null; }
+}
+let sync = loadSyncMeta(); // { token, gistId, login, baseRev, revs, dirty, changedAt, lastSync, error }
+const syncRun = { busy: null, again: false, timer: null, seq: 0, lastPull: 0, pending: null };
+function saveSyncMeta() {
+  try { if (sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }
+  catch (e) { /* ohne Speicher kein Sync-Zustand – der nächste Start gleicht neu ab */ }
+}
+function syncError(code, msg) { const e = new Error(msg); e.code = code; return e; }
+/* Fehler, die sich nicht von selbst erledigen: automatischer Abgleich pausiert bis „Jetzt abgleichen“ */
+function syncBlocked() { return !!(sync && sync.error && ['auth', 'notfound', 'format'].includes(sync.error.code)); }
+/* Token aus Eingabe oder Verbindungslink (…#sync=TOKEN) */
+function syncTokenFrom(text) {
+  let t = String(text || '').trim();
+  const i = t.indexOf('#sync=');
+  if (i >= 0) { try { t = decodeURIComponent(t.slice(i + 6)); } catch (e) { return null; } }
+  return /^[A-Za-z0-9_]{20,255}$/.test(t) ? t : null;
+}
+async function ghApi(path, opt = {}) {
+  let res;
+  try {
+    res = await fetch(SYNC_API + path, {
+      method: opt.method || 'GET', cache: 'no-store',
+      headers: Object.assign({ Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + (opt.token || sync.token) }, opt.body ? { 'Content-Type': 'application/json' } : {}),
+      body: opt.body ? JSON.stringify(opt.body) : undefined
+    });
+  } catch (e) { throw syncError('offline', 'Keine Verbindung – Änderungen werden später hochgeladen.'); }
+  if (res.status === 401) throw syncError('auth', 'GitHub lehnt den Token ab (ungültig, widerrufen oder abgelaufen).');
+  if (res.status === 429 || (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')) throw syncError('limit', 'GitHub bremst gerade (zu viele Anfragen) – neuer Versuch in Kürze.');
+  if (res.status === 403) throw syncError('auth', 'GitHub verweigert den Zugriff – hat der Token das Recht „gist“?');
+  if (res.status === 404) throw syncError('notfound', 'Das Sync-Gist wurde nicht gefunden – gelöscht, oder fehlt dem Token das Recht „gist“?');
+  if (!res.ok) throw syncError('http', `GitHub antwortet mit Fehler ${res.status} – neuer Versuch in Kürze.`);
+  return res.json();
+}
+async function syncFetchRemote(gistId, token) {
+  const g = await ghApi('/gists/' + gistId, { token });
+  const f = g.files && g.files[SYNC_FILE];
+  if (!f) return null;
+  let text = f.content;
+  if (f.truncated) { // über 1 MB liefert die API den Inhalt nur über raw_url
+    let r;
+    try { r = await fetch(f.raw_url, { cache: 'no-store' }); } catch (e) { throw syncError('offline', 'Keine Verbindung – Änderungen werden später hochgeladen.'); }
+    if (!r.ok) throw syncError('http', `GitHub antwortet mit Fehler ${r.status} – neuer Versuch in Kürze.`);
+    text = await r.text();
+  }
+  let meta, data;
+  try { meta = JSON.parse(text); data = parseImport(text); }
+  catch (e) { throw syncError('format', 'Der Online-Stand ist unlesbar: ' + e.message); }
+  return { rev: meta.rev || null, savedAt: meta.savedAt || meta.exportedAt || null, data };
+}
+/* Basis-Revision setzen und als bekannt merken (erkennt später verzögerte, ältere Antworten) */
+function syncSetBase(s, rev) { s.baseRev = rev; s.revs = (s.revs || []).filter(r => r !== rev).concat(rev).slice(-30); }
+function syncPayload(rev) { return JSON.stringify(Object.assign(exportPayload(), { rev, savedAt: new Date().toISOString() })); }
+/* Zwei Stände zusammenführen, wenn beide Geräte seit dem letzten Abgleich etwas geändert haben:
+   Profil, Plan, Equipment und Einstellungen vom zuletzt gespeicherten Stand; Trainingslogs, Körperwerte,
+   Check-ins und Blöcke aus beiden; erledigte/übersprungene Einheiten desselben Plans aus beiden. */
+function mergeStates(local, remote, remoteNewer) {
+  const a = remoteNewer ? remote : local, b = remoteNewer ? local : remote;
+  const out = deepClone(a);
+  const union = (k, key) => {
+    const have = new Set(out[k].map(key));
+    b[k].forEach(x => { if (!have.has(key(x))) { have.add(key(x)); out[k].push(deepClone(x)); } });
+  };
+  union('logs', x => x.id); union('body', x => x.date); union('checkins', x => x.date); union('blocks', x => x.planId);
+  const byDate = (x, y) => String(x.date).localeCompare(String(y.date));
+  out.logs.sort(byDate); out.body.sort(byDate); out.checkins.sort(byDate);
+  out.blocks.sort((x, y) => String(x.startedAt).localeCompare(String(y.startedAt)));
+  if (out.plan && b.plan && out.plan.id === b.plan.id) {
+    out.plan.done = Object.assign({}, b.plan.done, out.plan.done);
+    out.plan.skipped = Object.assign({}, b.plan.skipped, out.plan.skipped);
+  }
+  // Laufendes Training: abgeschlossen ist abgeschlossen; sonst lieber behalten als verlieren
+  const logged = id => out.logs.some(l => l.id === id);
+  if (out.active && logged(out.active.id)) out.active = null;
+  if (!out.active && b.active && !logged(b.active.id)) out.active = deepClone(b.active);
+  return out;
+}
+/* Selbsttest: Zusammenführen verliert keine Trainings und ist wiederholbar */
+function testSyncMerge(errors) {
+  const E = msg => errors.push('Sync: ' + msg);
+  const s = defaultState();
+  s.profile = { experience: 'beginner', days: 2, sessionMin: 45, mesoLength: 4, focus: [], injuries: [], extraSport: { type: 'none' } };
+  s.plan = generatePlan(s.profile, s.equipment, {});
+  s.plan.done = {};
+  const log = (id, date, day) => ({ id, date, planId: s.plan.id, week: 0, day, dayName: 'Test', exercises: [] });
+  const a = deepClone(s), b = deepClone(s);
+  a.logs.push(log('la', '2026-01-03T10:00:00.000Z', 1)); a.plan.done['0-1'] = 'la'; a.settings.theme = 'dark';
+  b.logs.push(log('lb', '2026-01-01T10:00:00.000Z', 0)); b.plan.done['0-0'] = 'lb'; b.body.push({ date: '2026-01-01', weightKg: 80 });
+  b.active = { id: 'lc', planId: s.plan.id, week: 0, day: 2, exercises: [] };
+  const m = mergeStates(a, b, false);
+  if (m.logs.map(l => l.id).join() !== 'lb,la') E('Trainings beider Geräte fehlen oder sind falsch sortiert');
+  if (!m.plan.done['0-0'] || !m.plan.done['0-1']) E('erledigte Einheiten nicht zusammengeführt');
+  if (m.settings.theme !== 'dark') E('zuletzt gespeicherter Stand nicht als Basis genutzt');
+  if (m.body.length !== 1) E('Körperwerte des anderen Geräts fehlen');
+  if (!m.active || m.active.id !== 'lc') E('laufendes Training des anderen Geräts verloren');
+  if (stableStringify(mergeStates(m, b, false)) !== stableStringify(m)) E('erneutes Zusammenführen nicht idempotent');
+  const c = deepClone(a), d = deepClone(b); c.active = { id: 'lb', exercises: [] }; d.active = null;
+  if (mergeStates(c, d, true).active || mergeStates(c, d, false).active) E('anderswo abgeschlossenes Training bleibt aktiv');
+  const back = parseImport(JSON.stringify(Object.assign({ app: 'muskelplan', schema: STATE_VERSION, rev: 'r1' }, { data: m })));
+  if (stableStringify(back) !== stableStringify(migrate(m))) E('Online-Format nicht verlustfrei');
+}
+/* Lokale Änderung merken und Upload einplanen (während des Trainings seltener) */
+function syncChanged() {
+  if (!sync) return;
+  syncRun.seq++;
+  sync.dirty = true; sync.changedAt = new Date().toISOString(); saveSyncMeta();
+  scheduleSync(state.active ? 15000 : 3000);
+}
+function scheduleSync(ms) {
+  clearTimeout(syncRun.timer);
+  if (sync && !syncBlocked()) syncRun.timer = setTimeout(() => syncNow(), ms);
+}
+/* Fremden Stand übernehmen (Pull oder Zusammenführung) */
+function adoptState(next) {
+  const activeId = state.active && state.active.id, hadProfile = !!state.profile;
+  state = next; persistLocal(); _sideCache.clear();
+  if (!state.active || state.active.id !== activeId) { stopTimer(); releaseWakeLock(); }
+  if (state.active) requestWakeLock();
+  if (!hadProfile && state.profile && ui.onboarding) ui.onboarding = null;
+  render();
+}
+/* Nicht mitten in eine Eingabe oder einen offenen Dialog hinein den Stand austauschen */
+function syncShouldDefer() {
+  const a = document.activeElement;
+  if ($('#dlg').open) return true;
+  return !!(a && a.closest && a.closest('#main') && (a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && !['checkbox', 'radio'].includes(a.type))));
+}
+async function syncOnce(s) {
+  if (_saveTimer) save(true); // ausstehende lokale Änderung zuerst festhalten
+  const seq = syncRun.seq;
+  const remote = await syncFetchRemote(s.gistId, s.token);
+  if (sync !== s) return 'gone';
+  syncRun.lastPull = Date.now();
+  let merged = false;
+  // Bereits bekannte ältere Revision = verzögerte Antwort von GitHub, kein neuer Stand → ignorieren
+  const stale = remote && (s.revs || []).includes(remote.rev);
+  if (remote && remote.rev !== s.baseRev && !stale) { // ein anderes Gerät hat inzwischen hochgeladen
+    if (syncShouldDefer()) { scheduleSync(5000); return 'deferred'; }
+    if (!s.dirty && syncRun.seq === seq) {
+      adoptState(remote.data); syncSetBase(s, remote.rev);
+      toast('Neuer Stand von einem anderen Gerät geladen.');
+      return 'pulled';
+    }
+    adoptState(mergeStates(state, remote.data, (remote.savedAt || '') > (s.changedAt || '')));
+    syncSetBase(s, remote.rev); s.dirty = true; merged = true;
+  }
+  if (!remote) s.dirty = true; // Datei fehlt im Gist → aktuellen Stand hochladen
+  if (!s.dirty) return 'same';
+  const rev = uidGen('r'), upSeq = syncRun.seq;
+  await ghApi('/gists/' + s.gistId, { method: 'PATCH', token: s.token, body: { files: { [SYNC_FILE]: { content: syncPayload(rev) } } } });
+  if (sync !== s) return 'gone';
+  syncSetBase(s, rev);
+  if (syncRun.seq === upSeq) s.dirty = false; // sonst wurde während des Uploads weiter geändert → nächster Upload folgt
+  if (merged) toast('Änderungen von einem anderen Gerät übernommen und zusammengeführt.');
+  return 'pushed';
+}
+function syncNow(manual) {
+  if (!sync) return Promise.resolve();
+  if (syncRun.busy) { syncRun.again = true; return syncRun.busy; }
+  clearTimeout(syncRun.timer);
+  const s = sync, wasBlocked = syncBlocked();
+  syncRun.busy = syncOnce(s).then(r => {
+    if (sync !== s || r === 'deferred') return;
+    if (!s.dirty) clearTimeout(syncRun.timer); // nichts mehr offen – eingeplanter Abgleich überflüssig
+    s.error = null; s.lastSync = new Date().toISOString();
+    if (manual && r !== 'pulled') toast(r === 'pushed' ? 'Hochgeladen – alles synchron.' : 'Alles synchron.'); // „pulled“ meldet syncOnce selbst
+  }, e => {
+    if (sync !== s) return;
+    s.error = { code: e.code || 'http', msg: e.message };
+    if (manual || (syncBlocked() && !wasBlocked)) toast((syncBlocked() ? 'Online-Sync gestoppt: ' : '') + e.message, 6000);
+    console.warn('[Muskelplan Sync]', e);
+  }).then(() => {
+    syncRun.busy = null;
+    if (sync === s) saveSyncMeta();
+    if (syncRun.again) { syncRun.again = false; scheduleSync(500); }
+    syncPaintStatus();
+  });
+  syncPaintStatus();
+  return syncRun.busy;
+}
+function syncOnVisibility() {
+  if (!sync || syncBlocked()) return;
+  if (document.visibilityState === 'hidden') { if (sync.dirty || _saveTimer) syncNow(); }
+  else if (sync.dirty || Date.now() - syncRun.lastPull > 20000) syncNow();
+}
+function syncTick() {
+  if (sync && !syncBlocked() && document.visibilityState === 'visible' && (sync.dirty || Date.now() - syncRun.lastPull > 300000)) syncNow();
+}
+/* Einrichtung: Token prüfen und ein vorhandenes Sync-Gist suchen – verbunden wird erst nach Bestätigung */
+async function syncConnect(token) {
+  const user = await ghApi('/user', { token });
+  let gist = null;
+  for (let page = 1; page <= 10 && !gist; page++) {
+    const list = await ghApi(`/gists?per_page=100&page=${page}`, { token });
+    gist = list.filter(g => g.files && g.files[SYNC_FILE]).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
+    if (list.length < 100) break;
+  }
+  const remote = gist ? await syncFetchRemote(gist.id, token) : null;
+  return { token, login: user.login, gistId: gist ? gist.id : null, remote };
+}
+/* mode: 'remote' = Online-Stand übernehmen · 'merge' = beide zusammenführen · 'local' = diesen Stand hochladen */
+async function syncFinish(info, mode) {
+  const now = new Date().toISOString();
+  let gistId = info.gistId, rev = info.remote ? info.remote.rev : null;
+  if (mode === 'remote') adoptState(info.remote.data);
+  else if (mode === 'merge') adoptState(mergeStates(state, info.remote.data, true));
+  if (!gistId) {
+    rev = uidGen('r');
+    const g = await ghApi('/gists', { method: 'POST', token: info.token, body: { description: 'Muskelplan – Trainingsdaten (Online-Sync, bitte nicht löschen)', public: false, files: { [SYNC_FILE]: { content: syncPayload(rev) } } } });
+    gistId = g.id;
+  }
+  sync = { token: info.token, gistId, login: info.login, baseRev: rev, revs: rev ? [rev] : [], dirty: mode === 'merge', changedAt: now, lastSync: now, error: null };
+  saveSyncMeta();
+  if (sync.dirty) await syncNow();
 }
 
 /* ---------- Plan-Fortschritt ---------- */
@@ -3479,6 +3710,7 @@ function applyTheme() {
 function storageBanner() {
   if (storageState.loadError) return `<div class="notice danger" role="alert"><strong>Speicherproblem</strong>${esc(storageState.loadError)}</div>`;
   if (!storageState.ok) return `<div class="notice warn" role="alert"><strong>Speichern nicht möglich</strong>Deine Eingaben werden aktuell nicht dauerhaft gespeichert. Bitte exportiere ein Backup (Profil → Daten).</div>`;
+  if (syncBlocked()) return `<div class="notice warn" role="alert"><strong>Online-Sync gestoppt</strong>${esc(sync.error.msg)} Unter Profil → Online-Sync kannst du es erneut versuchen oder neu verbinden.</div>`;
   return '';
 }
 function focusKey(el) {
@@ -3525,7 +3757,7 @@ function viewWelcome() {
     <p style="opacity:.88;margin-bottom:16px">Ein paar kurze Fragen, dann steht dein Plan. Alles bleibt offline auf deinem Gerät.</p>
     <button type="button" class="hero-cta" data-action="start-onboarding">Los geht’s ${icon('right')}</button>
   </section>
-  <div class="row" style="justify-content:center"><button type="button" class="btn ghost" data-action="import">Backup importieren</button></div>`;
+  <div class="row" style="justify-content:center"><button type="button" class="btn ghost" data-action="import">Backup importieren</button>${sync ? '' : '<button type="button" class="btn ghost" data-action="sync-setup">Online-Sync verbinden</button>'}</div>`;
 }
 
 /* ---------- Einrichtung („Plangestalter“) ----------
@@ -3653,7 +3885,7 @@ function viewOnboarding() {
       </ul>
       <div class="notice warn"><strong>Kurz vorab</strong>Muskelplan gibt allgemeine Trainings- und Ernährungsrichtwerte und ist keine medizinische Beratung. Du trainierst auf eigene Verantwortung. Brich eine Übung bei Schmerzen, Schwindel oder Atemnot sofort ab.</div>
       <label class="opt"><input type="checkbox" data-ob="accepted" ${ob.accepted ? 'checked' : ''}><span><span class="opt-title">Verstanden – los geht’s</span></span></label>
-      ${state.profile ? '' : '<div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="btn ghost sm" data-action="import">Ich habe ein Backup</button></div>'}`;
+      ${state.profile ? '' : `<div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="btn ghost sm" data-action="import">Ich habe ein Backup</button>${sync ? '' : '<button type="button" class="btn ghost sm" data-action="sync-setup">Online-Sync verbinden</button>'}</div>`}`;
   } else if (id === 'health') {
     const q = d.parq, any = q.any === true ? 'yes' : q.any === false ? 'no' : (parqAnswered(q) ? (parqFlagged(q) ? 'yes' : 'no') : '');
     body = `<h2>Kurzer Gesundheitscheck</h2>
@@ -3664,7 +3896,7 @@ function viewOnboarding() {
         <label class="opt"><input type="radio" name="parqAny" value="yes" data-ob-parq-any="1" ${any === 'yes' ? 'checked' : ''}><span><span class="opt-title">Ja, mindestens einer</span><span class="opt-desc">Du kannst den Plan trotzdem erstellen.</span></span></label>
       </div>
       ${any === 'yes' ? '<div class="notice danger" role="alert"><strong>Bitte vorher ärztlich abklären</strong>Kläre vor dem Trainingsstart ärztlich ab, ob und wie du trainieren kannst – und starte dann besonders vorsichtig.</div>' : ''}
-      <p class="hint">Die Antwort bleibt auf deinem Gerät und wird später nicht noch einmal abgefragt.</p>`;
+      <p class="hint">Die Antwort bleibt ${sync ? 'in deinen eigenen Daten (Gerät und Gist)' : 'auf deinem Gerät'} und wird später nicht noch einmal abgefragt.</p>`;
   } else if (id === 'about') {
     body = `<h2>Über dich</h2>
       <p class="ob-lead">Damit Umfang und Ernährung zu dir passen.</p>
@@ -4823,8 +5055,10 @@ function viewProfile() {
     <fieldset><legend>Pausentimer anpassen</legend>${segRadio('restAdj', [{ v: -30, l: '−30 s' }, { v: 0, l: 'Standard' }, { v: 30, l: '+30 s' }], st.restAdjust || 0, 'data-set="restAdjust"')}</fieldset>
   </div>
 
+  ${viewSyncCard()}
+
   <div class="card"><h2>Daten</h2>
-    ${daysSinceExport == null || daysSinceExport > 14 ? `<div class="notice ${state.logs.length ? 'warn' : 'info'}"><strong>Backup-Hinweis</strong>${daysSinceExport == null ? 'Du hast noch kein Backup exportiert.' : `Dein letztes Backup ist ${daysSinceExport} Tage alt.`} Daten liegen nur in diesem Browser – beim Löschen der Browserdaten gehen sie verloren.</div>` : `<p class="muted small">Letztes Backup: ${fmtDate(st.lastExport)}.</p>`}
+    ${sync ? `<p class="muted small">Dank Online-Sync liegt eine Kopie deiner Daten in deinem GitHub-Gist.${st.lastExport ? ` Letztes Backup: ${fmtDate(st.lastExport)}.` : ''}</p>` : daysSinceExport == null || daysSinceExport > 14 ? `<div class="notice ${state.logs.length ? 'warn' : 'info'}"><strong>Backup-Hinweis</strong>${daysSinceExport == null ? 'Du hast noch kein Backup exportiert.' : `Dein letztes Backup ist ${daysSinceExport} Tage alt.`} Daten liegen nur in diesem Browser – beim Löschen der Browserdaten gehen sie verloren.</div>` : `<p class="muted small">Letztes Backup: ${fmtDate(st.lastExport)}.</p>`}
     <div class="row">
       <button type="button" class="btn primary" data-action="export">Daten exportieren (JSON)</button>
       <button type="button" class="btn" data-action="import">Backup importieren</button>
@@ -4848,7 +5082,7 @@ function viewProfile() {
 
   <div class="card soft"><h2>Über Muskelplan</h2>
     <p class="small">Der Plan folgt dem aktuellen Stand der Trainingswissenschaft. <strong>Keine medizinische Beratung:</strong> Die Werte ersetzen keine ärztliche, physiotherapeutische oder ernährungsfachliche Beratung. Training auf eigene Verantwortung – bei Schmerzen, Vorerkrankungen, Schwangerschaft oder Unsicherheit vorher ärztlich abklären.</p>
-    <p class="small" style="margin:0">Alle Daten bleiben lokal auf diesem Gerät. Mach regelmäßig ein Backup.</p>
+    <p class="small" style="margin:0">${sync ? 'Deine Daten liegen auf diesem Gerät und – über den Online-Sync – in deinem privaten GitHub-Gist.' : 'Alle Daten bleiben lokal auf diesem Gerät. Mach regelmäßig ein Backup.'}</p>
   </div>`;
 }
 function parseList(txt) {
@@ -4959,6 +5193,81 @@ function doImportFile(file) {
   r.readAsText(file);
 }
 
+/* ---------- Online-Sync · Oberfläche ---------- */
+function fmtSyncTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '–';
+  const day = d.toDateString() === new Date().toDateString() ? 'heute' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return day + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+function syncStatusHtml() {
+  if (!sync) return '';
+  const e = sync.error;
+  const [cls, txt] = syncRun.busy ? ['accent', 'Gleicht ab …'] : syncBlocked() ? ['danger', 'Gestoppt'] : e ? ['warn', e.code === 'offline' ? 'Offline' : 'Wartet'] : sync.dirty ? ['accent', 'Änderungen offen'] : ['ok', '✓ Synchron'];
+  return `<p style="margin:0"><span class="chip ${cls}">${txt}</span>${sync.lastSync ? ` <span class="muted small">zuletzt abgeglichen ${esc(fmtSyncTime(sync.lastSync))}</span>` : ''}</p>${e ? `<p class="hint">${esc(e.msg)}</p>` : ''}`;
+}
+/* Nur den Status neu zeichnen – ein volles render() würde laufende Eingaben im Profil zurücksetzen */
+function syncPaintStatus() { const el = document.getElementById('syncStatus'); if (el) el.innerHTML = syncStatusHtml(); }
+function viewSyncCard() {
+  if (!sync) return `<div class="card"><h2>Online-Sync</h2>
+    <p class="small">Speichert deine Daten zusätzlich in einem privaten Gist in deinem GitHub-Konto. So hast du auf Handy, Tablet und PC denselben Stand – auch nach dem Löschen der Browserdaten.</p>
+    <button type="button" class="btn primary" data-action="sync-setup">Online-Sync einrichten</button></div>`;
+  return `<div class="card"><h2>Online-Sync</h2>
+    <div id="syncStatus" aria-live="polite">${syncStatusHtml()}</div>
+    <p class="hint">Verbunden mit GitHub${sync.login ? ` als <strong>${esc(sync.login)}</strong>` : ''} · Daten im privaten Gist „${esc(SYNC_FILE)}“.</p>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="btn" data-action="sync-now">Jetzt abgleichen</button>
+      <button type="button" class="btn" data-action="sync-share">Weiteres Gerät verbinden</button>
+      <button type="button" class="btn danger" data-action="sync-off">Trennen</button>
+    </div></div>`;
+}
+function openSyncSetup(prefill) {
+  openDialog(`${closeBtn()}<h2 id="dlgTitle">Online-Sync einrichten</h2>
+    <p>Deine Daten werden in einem privaten Gist in deinem GitHub-Konto gespeichert und auf allen verbundenen Geräten abgeglichen.</p>
+    ${prefill ? '<p class="small">Der Zugangsschlüssel aus deinem Verbindungslink ist schon eingetragen.</p>' : `<ol class="small" style="padding-left:20px">
+      <li><a href="${SYNC_TOKEN_URL}" target="_blank" rel="noopener">Token bei GitHub erstellen</a>: „gist“ ist schon angehakt. Bei „Expiration“ am besten „No expiration“ wählen, dann unten „Generate token“.</li>
+      <li>Den Token (beginnt mit „ghp_“) kopieren und hier einfügen.</li>
+      <li>Auf weiteren Geräten den Verbindungslink nutzen oder denselben Token einfügen.</li></ol>`}
+    <div class="field"><label for="syncToken">GitHub-Token oder Verbindungslink</label>
+      <input id="syncToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ghp_…" value="${esc(prefill || '')}">
+      <p id="syncMsg" class="hint" aria-live="polite"></p></div>
+    <div class="dlg-actions"><button type="button" class="btn" data-action="dlg-close">Abbrechen</button>
+      <button type="button" class="btn primary" data-action="sync-connect">Weiter</button></div>`);
+}
+/* Bestätigung mit Kontoname und beiden Ständen – erst danach wird verbunden bzw. hochgeladen */
+function openSyncChoice(info) {
+  syncRun.pending = info;
+  const r = info.remote, localHas = !!(state.profile || state.logs.length);
+  const btn = (mode, label, primary) => `<button type="button" class="btn${primary ? ' primary' : ''}" data-action="sync-finish" data-mode="${mode}">${label}</button>`;
+  const remoteTxt = r ? `Im Gist liegt ein Stand mit ${r.data.logs.length} ${r.data.logs.length === 1 ? 'Training' : 'Trainings'}${r.data.profile ? '' : ' (ohne Profil)'}, zuletzt gespeichert ${esc(r.savedAt ? fmtSyncTime(r.savedAt) : '–')}.` : 'Es gibt noch keinen Online-Stand – ein privates Gist wird angelegt.';
+  const localTxt = localHas ? `Auf diesem Gerät: ${state.logs.length} ${state.logs.length === 1 ? 'Training' : 'Trainings'}.` : 'Auf diesem Gerät sind noch keine Daten.';
+  let hint = '', actions;
+  if (r && localHas) {
+    hint = '<p class="small"><strong>Online-Stand übernehmen</strong> ersetzt die Daten auf diesem Gerät. <strong>Zusammenführen</strong> behält die Trainings von beiden; Profil und Plan kommen vom Online-Stand.</p>';
+    actions = btn('merge', 'Zusammenführen') + btn('remote', 'Online-Stand übernehmen', true);
+  } else if (r) actions = btn('remote', 'Online-Stand laden', true);
+  else actions = btn('local', localHas ? 'Hochladen und verbinden' : 'Verbinden', true);
+  openDialog(`${closeBtn()}<h2 id="dlgTitle">Mit ${esc(info.login)} verbinden?</h2>
+    <p>${remoteTxt}<br>${localTxt}</p>${hint}
+    <p id="syncMsg" class="hint" aria-live="polite"></p>
+    <div class="dlg-actions"><button type="button" class="btn" data-action="dlg-close">Abbrechen</button>${actions}</div>`);
+}
+function syncLink() { return location.origin + location.pathname + '#sync=' + encodeURIComponent(sync.token); }
+/* Verbindungslink eines anderen Geräts (#sync=TOKEN): Token auslesen und sofort aus der Adresse entfernen */
+function takeSyncLink() {
+  if (!location.hash.startsWith('#sync=')) return null;
+  const t = syncTokenFrom(location.hash);
+  try { history.replaceState(null, '', location.pathname + location.search + (ui.tab && ui.tab !== 'heute' ? '#' + ui.tab : '')); } catch (e) { location.hash = ''; }
+  return t;
+}
+function openSyncShare() {
+  openDialog(`${closeBtn()}<h2 id="dlgTitle">Weiteres Gerät verbinden</h2>
+    <p>Öffne den Verbindungslink auf dem anderen Gerät. Nutzt du dort die App vom Home-Bildschirm, füge den Link stattdessen unter <strong>Profil → Online-Sync einrichten</strong> ein.</p>
+    <div class="notice warn"><strong>Nur an dich selbst schicken</strong>Der Link enthält deinen Zugangsschlüssel zum Gist.</div>
+    <div class="dlg-actions">${navigator.share ? '<button type="button" class="btn" data-action="sync-link" data-v="share">Teilen …</button>' : ''}
+      <button type="button" class="btn primary" data-action="sync-link" data-v="copy">Link kopieren</button></div>`);
+}
+
 const ACTIONS = {
   tab: el => { closeDialog(); ui.onboarding = null; go(el.dataset.tab); },
   'start-onboarding': () => { ui.onboarding = state.profile ? newOnboarding(true) : restoreOnboarding(); render(); },
@@ -5005,13 +5314,43 @@ const ACTIONS = {
   'plan-week': el => { ui.planWeek = Number(el.dataset.w); render(); },
   'regen-plan': () => regenPlan(),
   'reset-plan': () => confirmDialog({ title: 'Plan zurücksetzen?', text: 'Der aktuelle Plan wird gelöscht. Profil, Logs und Körperwerte bleiben erhalten. Du kannst danach einen neuen Plan erstellen.', ok: 'Plan löschen', danger: true }).then(ok => { if (ok) { state.plan = null; state.active = null; stopTimer(); save(true); render(); toast('Plan zurückgesetzt.'); } }),
-  'delete-all': () => confirmDialog({ title: 'Alle Daten löschen?', text: 'Profil, Plan, alle Trainingslogs, Körperwerte und Einstellungen werden unwiderruflich aus diesem Browser gelöscht. Exportiere vorher ein Backup, wenn du sie behalten willst.', ok: 'Endgültig löschen', danger: true }).then(ok => {
+  'delete-all': () => confirmDialog({ title: 'Alle Daten löschen?', text: 'Profil, Plan, alle Trainingslogs, Körperwerte und Einstellungen werden unwiderruflich aus diesem Browser gelöscht. ' + (sync ? 'Der Online-Sync wird getrennt – der Stand in deinem GitHub-Gist bleibt erhalten.' : 'Exportiere vorher ein Backup, wenn du sie behalten willst.'), ok: 'Endgültig löschen', danger: true }).then(ok => {
     if (!ok) return;
+    sync = null; saveSyncMeta(); clearTimeout(syncRun.timer); // sonst würde der leere Stand online alles überschreiben
     try { localStorage.removeItem(STORE_KEY); } catch (e) { /* ignorieren */ }
     state = defaultState(); stopTimer(); releaseWakeLock(); ui.onboarding = newOnboarding(false); save(true); go('heute'); render(); toast('Alle Daten gelöscht.');
   }),
   export: () => doExport(),
   import: () => { const f = document.getElementById('importFile'); f.value = ''; f.click(); },
+  'sync-setup': () => openSyncSetup(),
+  'sync-connect': el => {
+    const inp = $('#syncToken'), msg = $('#syncMsg'), token = syncTokenFrom(inp.value);
+    if (!token) { inp.setAttribute('aria-invalid', 'true'); msg.textContent = 'Bitte einen gültigen Token (ghp_…) oder Verbindungslink einfügen.'; inp.focus(); return; }
+    inp.removeAttribute('aria-invalid'); el.disabled = true; msg.textContent = 'Prüfe den Zugang bei GitHub …';
+    syncConnect(token).then(openSyncChoice, e => { el.disabled = false; inp.setAttribute('aria-invalid', 'true'); msg.textContent = e.message; });
+  },
+  'sync-finish': el => {
+    const info = syncRun.pending;
+    if (!info) return;
+    $('#dlg').querySelectorAll('button').forEach(b => { b.disabled = true; });
+    $('#syncMsg').textContent = 'Verbinde …';
+    syncFinish(info, el.dataset.mode).then(() => {
+      syncRun.pending = null; closeDialog(); render(); toast('Online-Sync ist aktiv.');
+      if (state.profile) requestPersistentStorage();
+    }, e => { $('#dlg').querySelectorAll('button').forEach(b => { b.disabled = false; }); $('#syncMsg').textContent = e.message; });
+  },
+  'sync-now': () => syncNow(true),
+  'sync-share': () => openSyncShare(),
+  'sync-link': el => {
+    const link = syncLink();
+    if (el.dataset.v === 'share') navigator.share({ title: 'Muskelplan verbinden', url: link }).catch(() => {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => toast('Link kopiert.'), () => toast('Kopieren nicht möglich.'));
+    else toast('Kopieren nicht möglich.');
+  },
+  'sync-off': () => confirmDialog({ title: 'Online-Sync trennen?', text: 'Dieses Gerät gleicht dann nicht mehr ab. Deine Daten bleiben hier und im GitHub-Gist erhalten; du kannst jederzeit neu verbinden.', ok: 'Trennen' }).then(ok => {
+    if (!ok) return;
+    sync = null; saveSyncMeta(); clearTimeout(syncRun.timer); render(); toast('Online-Sync getrennt.');
+  }),
   'eq-reset': () => confirmDialog({ title: 'Equipment zurücksetzen?', text: 'Alle Equipment-Angaben werden auf dein Standardprofil zurückgesetzt.', ok: 'Zurücksetzen' }).then(ok => { if (ok) { const sp = state.equipment.spotterAvailable; state.equipment = deepClone(EQUIPMENT_PROFILE); state.equipment.spotterAvailable = sp; _sideCache.clear(); save(); render(); } }),
   'run-selftest': el => runSelfTestUI(el.dataset.level),
   'show-ev': el => openEvidence(el.dataset.ref),
@@ -5180,6 +5519,7 @@ function requestPersistentStorage() {
 }
 function init() {
   state = loadState();
+  const linkToken = takeSyncLink();
   ui.tab = parseHash();
   if (!state.profile) ui.onboarding = restoreOnboarding();
   document.addEventListener('click', e => {
@@ -5200,13 +5540,23 @@ function init() {
   });
   $('#dlg').addEventListener('close', () => { if (dlgResolve) { const r = dlgResolve; dlgResolve = null; r(false); } ui.swapCtx = ui.swapCtx && null; });
   $('#dlg').addEventListener('click', e => { if (e.target.id === 'dlg') closeDialog(); }); // Klick auf Hintergrund
-  window.addEventListener('hashchange', () => { ui.tab = parseHash(); render(); $('#main').focus({ preventScroll: true }); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (state.active) requestWakeLock(); tickTimer(); } });
+  window.addEventListener('hashchange', () => {
+    const t = takeSyncLink();
+    if (t) { if (sync) toast('Dieses Gerät ist bereits mit dem Online-Sync verbunden.'); else openSyncSetup(t); return; }
+    ui.tab = parseHash(); render(); $('#main').focus({ preventScroll: true });
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (state.active) requestWakeLock(); tickTimer(); } syncOnVisibility(); });
+  window.addEventListener('online', () => { if (sync) syncNow(); });
+  window.addEventListener('focus', syncOnVisibility); // Desktop: Fensterwechsel ändert die Sichtbarkeit nicht
   setInterval(updateElapsed, 30000);
+  setInterval(syncTick, 60000);
   registerServiceWorker();
   if (state.profile) requestPersistentStorage();
   render();
   if (state.active) requestWakeLock();
+  if (sync) syncNow();
+  else if (linkToken) openSyncSetup(linkToken);
+  if (sync && linkToken) toast('Dieses Gerät ist bereits mit dem Online-Sync verbunden.');
   // Automatischer Selbsttest (leichte Stufe) nach dem ersten Rendern – Ergebnis in der Konsole
   const boot = () => { try { const r = runSelfTest({ level: 'boot' }); if (!ui.selfTest) ui.selfTest = r; } catch (e) { console.error('[Muskelplan Selbsttest] Abbruch:', e); } };
   if ('requestIdleCallback' in window) requestIdleCallback(boot, { timeout: 3000 }); else setTimeout(boot, 800);
