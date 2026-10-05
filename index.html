@@ -273,6 +273,8 @@ fieldset { border:0; padding:0; margin:0 0 18px; min-width:0; }
 details[open] > summary .when-closed { display:none; }
 .seg.days { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
 .seg.days span { min-width:0; width:100%; padding:6px 0; }
+.seg.days label.hb span { box-shadow:inset 0 -3px 0 var(--energy); }
+.seg.days label.hb input:checked + span { box-shadow:inset 0 -3px 0 color-mix(in srgb, var(--energy) 80%, #fff); }
 
 .switch { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:48px; padding:8px 0; cursor:pointer; }
 .switch + .switch { border-top:1px solid var(--border); }
@@ -1421,16 +1423,19 @@ const POWER_SESSIONS = {
   B: [['pw-broad', 'pw-skater'], ['pw-broad', 'pw-skater'], ['pw-broad', 'pw-skater']]
 };
 
-/* Alternative Wochenmuster je Split (Abstände wie im Original → 48-h-Regel bleibt erfüllbar).
-   Wird genutzt, um Beintage mit Abstand zu Training und Spiel des Zusatzsports zu legen. */
-const SPLIT_PATTERNS = {
-  fb2: [[0,3],[0,2],[0,4]],
-  fb3: [[0,2,4],[0,2,5]],
-  ppl3: [[0,2,4],[0,1,3],[0,2,5]],
-  ul4: [[0,1,3,4],[0,1,4,5],[0,2,3,5],[0,1,3,5]],
-  ulppl5: [[0,1,3,4,5],[0,1,2,4,5]],
-  ppl6: [[0,1,2,3,4,5]]
+/* Mögliche Zusammensetzungen der Trainingswoche je Anzahl Krafttage. Daraus wählt die App die beste Verteilung
+   auf deine (festen oder vorgeschlagenen) Tage: nie Beine/Ganzkörper am Tag vor dem Handball, 48 h Abstand für
+   dieselben Muskeln, jeder Muskel möglichst 2× pro Woche. */
+const SPLIT_COMPOSITIONS = {
+  2: [['FB','FB'], ['UP','FB'], ['UP','LO'], ['PUSH','PULL'], ['UP','UP']],
+  3: [['FB','FB','FB'], ['UP','FB','FB'], ['UP','UP','FB'], ['UP','LO','FB'], ['UP','UP','LO'], ['PUSH','PULL','LEGS'], ['UP','UP','UP']],
+  4: [['UP','LO','UP','LO'], ['UP','FB','UP','FB'], ['UP','UP','LO','FB'], ['PUSH','PULL','LEGS','UP'], ['PUSH','PULL','LEGS','FB'], ['UP','UP','UP','LO'], ['PUSH','PULL','PUSH','PULL']],
+  5: [['UP','LO','PUSH','PULL','LEGS'], ['UP','LO','UP','LO','FB'], ['UP','UP','LO','PUSH','PULL'], ['PUSH','PULL','LEGS','UP','FB'], ['PUSH','PULL','PUSH','PULL','UP']],
+  6: [['PUSH','PULL','LEGS','PUSH','PULL','LEGS'], ['UP','LO','UP','LO','PUSH','PULL'], ['PUSH','PULL','UP','PUSH','PULL','LEGS'], ['PUSH','PULL','PUSH','PULL','UP','LEGS']]
 };
+/* Welche Tagestypen trainieren dieselben Muskeln (→ 48 h Abstand nötig)? */
+const TYPE_SHARE = { FB: ['FB','UP','LO','PUSH','PULL','LEGS'], UP: ['FB','UP','PUSH','PULL'], LO: ['FB','LO','LEGS'], PUSH: ['FB','UP','PUSH'], PULL: ['FB','UP','PULL'], LEGS: ['FB','LO','LEGS'] };
+const TYPE_NAMES = { FB: 'Ganzkörper', UP: 'Oberkörper', LO: 'Unterkörper', PUSH: 'Push', PULL: 'Pull', LEGS: 'Beine' };
 const LEG_TYPES = ['LO','LEGS','FB'];
 
 /* Wenn ein Muskel unter Ziel liegt: aus diesen Mustern wird eine Zusatzübung gewählt */
@@ -1825,44 +1830,80 @@ function getSplit(profile) {
   if (d === 3) return profile.split3 === 'ppl' ? SPLITS.ppl3 : SPLITS.fb3;
   return SPLITS[{ 2: 'fb2', 4: 'ul4', 5: 'ulppl5', 6: 'ppl6' }[d]];
 }
-/* Wie ungünstig liegt ein Krafttag (Tagestyp) an Wochentag wd, gemessen an Training/Spiel des Zusatzsports? */
-function schedulePenalty(type, wd, sd) {
-  const tomorrow = (wd + 1) % 7, yesterday = (wd + 6) % 7;
-  let p = 0;
-  if (LEG_TYPES.includes(type)) {
-    if (wd === sd.match) p += 100;              // Beine am Spieltag
-    if (tomorrow === sd.match) p += 60;         // Beine am Tag vor dem Spiel
-    if (yesterday === sd.match) p += 12;        // direkt nach dem Spiel: erst erholen
-    if (sd.train.includes(tomorrow)) p += 10;   // schwere Beine im Handballtraining
-    if (sd.train.includes(wd)) p += 6;          // Beine + Sport am selben Tag
-  } else {
-    if (wd === sd.match) p += 40;
-    if (tomorrow === sd.match) p += 4;
-    if (sd.train.includes(wd)) p += 1;
-  }
-  return p;
+/* Darf an Wochentag wd Bein- oder Ganzkörpertraining liegen? Nicht am Tag vor Handball-Training oder Spiel und nicht am Spieltag. */
+function legBlocked(wd, sd) { const t = (wd + 1) % 7; return wd === sd.match || t === sd.match || sd.train.includes(t); }
+function hasSportDays(sd) { return !!(sd.train.length || sd.match != null); }
+/* Feste Krafttage (falls gewählt) – sonst null = spontan */
+function fixedGymDays(profile) {
+  const g = profile && profile.dayMode === 'fixed' ? [...new Set((profile.gymDays || []).map(Number))].filter(d => d >= 0 && d < 7).sort((a, b) => a - b) : [];
+  return g.length >= 2 ? g.slice(0, 6) : null;
 }
-/* Wochentage der Krafteinheiten passend zum Zusatzsport wählen (Rotationen der erlaubten Muster).
-   Rückgabe: Split-Kopie mit chronologisch sortierten Tagen; A/B-Varianten je Tagestyp bleiben in Reihenfolge. */
-function scheduleSplit(split, profile) {
-  const sd = sportDays(profile && profile.extraSport);
-  if (!sd.train.length && sd.match == null) return split;
-  const types = split.days.map(k => DAY_TEMPLATES[k].type);
-  const score = offs => types.reduce((a, t, i) => a + schedulePenalty(t, offs[i], sd), 0);
-  let best = { offs: split.offsets, s: score(split.offsets) };
-  (SPLIT_PATTERNS[split.key] || [split.offsets]).forEach((pat, pi) => {
-    for (let k = 0; k < 7; k++) {
-      const offs = pat.map(o => (o + k) % 7), s = score(offs) + pi * 0.05 + k * 0.01;
-      if (s < best.s - 1e-9) best = { offs, s };
+/* Bewertung einer Woche (Tagestypen auf Wochentagen): kleiner = besser */
+function splitPenalty(types, days, sd) {
+  let p = 0;
+  types.forEach((t, i) => {
+    const wd = days[i], leg = LEG_TYPES.includes(t);
+    if (leg) {
+      if (legBlocked(wd, sd)) p += 1000;            // nie Beine/Ganzkörper vor dem Handball
+      if (sd.train.includes(wd)) p += 30;           // möglichst auch nicht am Handball-Tag selbst
+      if ((wd + 6) % 7 === sd.match) p += 8;        // direkt nach dem Spiel erst erholen
+    } else {
+      if (wd === sd.match) p += 40;
+      if (sd.train.includes(wd)) p += 1;
     }
+    for (let j = i + 1; j < types.length; j++) if (TYPE_SHARE[t].includes(types[j]) && circDist(wd, days[j]) < 2) p += 10000; // 48 h
   });
-  // Chronologisch ordnen; je Tagestyp die Vorlagen (A, B, …) in ursprünglicher Reihenfolge vergeben
-  const order = types.map((t, i) => ({ t, wd: best.offs[i] })).sort((a, b) => a.wd - b.wd);
-  const pool = {};
-  split.days.forEach(k => { const t = DAY_TEMPLATES[k].type; (pool[t] = pool[t] || []).push(k); });
+  const n = ts => types.filter(t => ts.includes(t)).length;
+  const chest = n(['FB','UP','PUSH']), back = n(['FB','UP','PULL']), legs = n(['FB','LO','LEGS']);
+  p += Math.max(0, 2 - chest) * 25 + Math.max(0, 2 - back) * 25 + Math.max(0, 2 - legs) * 20 + (legs === 0 ? 60 : 0);
+  return p - 0.2 * (Math.min(chest, 3) + Math.min(back, 3) + Math.min(legs, 3)); // bei Gleichstand: höhere Frequenz
+}
+function multisetPerms(arr) {
+  const out = [], a = arr.slice().sort(), used = a.map(() => false), cur = [];
+  (function rec() {
+    if (cur.length === a.length) { out.push(cur.slice()); return; }
+    for (let i = 0; i < a.length; i++) {
+      if (used[i] || (i > 0 && a[i] === a[i - 1] && !used[i - 1])) continue;
+      used[i] = true; cur.push(a[i]); rec(); cur.pop(); used[i] = false;
+    }
+  })();
+  return out;
+}
+function weekdaySets(n) {
+  const out = [];
+  (function rec(start, cur) { if (cur.length === n) { out.push(cur.slice()); return; } for (let d = start; d < 7; d++) { cur.push(d); rec(d + 1, cur); cur.pop(); } })(0, []);
+  return out;
+}
+/* Split für das Profil: Standard ohne Zusatzsport und ohne feste Tage – sonst die beste Verteilung der Einheiten
+   auf deine festen Tage (bzw. bei spontanem Training auf vorgeschlagene Tage). */
+function planSplit(profile) { return splitCandidates(profile)[0]; }
+/* Kandidaten (opts.margin: wie viel schlechter als die beste Verteilung, opts.max: Anzahl) */
+function splitCandidates(profile, opts = {}) {
+  const fixed = fixedGymDays(profile), sd = sportDays(profile && profile.extraSport);
+  const base = getSplit(fixed ? Object.assign({}, profile, { days: fixed.length }) : profile);
+  if (!fixed && !hasSportDays(sd)) return [base];
+  const n = base.days.length, def = base.days.map(k => DAY_TEMPLATES[k].type);
+  const comps = [def, ...(SPLIT_COMPOSITIONS[n] || [])].filter((c, i, arr) => arr.findIndex(x => x.slice().sort().join() === c.slice().sort().join()) === i);
+  const sets = fixed ? [fixed] : weekdaySets(n);
+  // Je Zusammensetzung die beste Verteilung; Kandidaten = alle, die fast so gut sind wie die beste
+  const perComp = comps.map((c, ci) => {
+    let b = null;
+    multisetPerms(c).forEach(types => sets.forEach(days => { const sc = splitPenalty(types, days, sd) + (ci === 0 ? 0 : 1); if (!b || sc < b.sc - 1e-9) b = { sc, types, days }; }));
+    return b;
+  }).filter(Boolean).sort((a, b) => a.sc - b.sc);
+  return perComp.filter(c => c.sc <= perComp[0].sc + (opts.margin || 0) + 1e-9).slice(0, opts.max || 1).map(c => makeSplit(c, base, def, n, fixed));
+}
+function makeSplit(best, base, def, n, fixed) {
+  // Vorlagen je Tagestyp in Reihenfolge vergeben (A, B, C …; bei mehr Tagen wieder von vorn)
+  const pool = {}; Object.values(DAY_TEMPLATES).forEach(t => { (pool[t.type] = pool[t.type] || []); });
+  Object.entries(DAY_TEMPLATES).forEach(([k, t]) => pool[t.type].push(k));
   const used = {};
-  const days = order.map(o => { const i = used[o.t] || 0; used[o.t] = i + 1; return pool[o.t][i]; });
-  return Object.assign({}, split, { days, offsets: order.map(o => o.wd), scheduled: true });
+  const days = best.types.map(t => { const i = used[t] || 0; used[t] = i + 1; return pool[t][i % pool[t].length]; });
+  const same = best.types.slice().sort().join() === def.slice().sort().join();
+  const isPPL3 = n === 3 && best.types.slice().sort().join() === 'LEGS,PULL,PUSH';
+  const counts = {}; best.types.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+  const name = same ? base.name : ['UP', 'LO', 'PUSH', 'PULL', 'LEGS', 'FB'].filter(t => counts[t]).map(t => `${counts[t] > 1 ? counts[t] + '× ' : ''}${TYPE_NAMES[t]}`).join(' + ');
+  return { key: isPPL3 ? 'ppl3' : same ? base.key : 'custom', name, days, offsets: best.days.slice(), scheduled: true, fixed: !!fixed };
 }
 /* ---------- Zusatzsport: Belastung, Volumenreduktion, Trainingsvorgaben ---------- */
 function hasSport(s) { return !!(s && s.type && s.type !== 'none' && SPORTS[s.type]); }
@@ -2428,9 +2469,18 @@ function cloneWeek(w) { return deepClone(w); }
    Variante gerechnet (kürzere, noch ausreichende Pausen, kompakteres Aufwärmen) – genommen wird die mit mehr Muskelaufbau.
    Die Zeit des Nutzers ist gesetzt: Die App plant das Bestmögliche hinein, statt mehr Zeit zu fordern. */
 function generatePlan(profile, eq, opts = {}) {
-  const normal = buildPlan(profile, eq, opts, false);
+  // Bei eigenen Tagen/Zusatzsport: die fast gleich guten Wochenaufteilungen durchrechnen
+  let best = null;
+  splitCandidates(profile, { margin: 5, max: 3 }).forEach(split => {
+    const p = timeVariant(profile, eq, opts, split), sc = planScore(p, profile);
+    if (!best || sc > best.sc + 1e-9) best = { p, sc };
+  });
+  return best.p;
+}
+function timeVariant(profile, eq, opts, split) {
+  const normal = buildPlan(profile, eq, opts, false, split);
   if (normal.sessionMin >= 999 || !isTimeLimited(normal)) return normal;
-  const compact = buildPlan(profile, eq, opts, true);
+  const compact = buildPlan(profile, eq, opts, true, split);
   return planScore(compact, profile) > planScore(normal, profile) ? compact : normal;
 }
 /* Begrenzt die Zeit das Volumen? (ein Muskel unter Korridor oder deutlich unter Wochenziel) */
@@ -2443,10 +2493,10 @@ function planScore(plan, profile) {
   const focus = (profile && profile.focus) || [], eff = plan.compact ? 0.97 : 1;
   return plan.weeks.filter(w => !w.deload).reduce((a, w) => a + TRACKED.reduce((b, m) => b + MUSCLES[m].f * (focus.includes(m) ? 1.5 : 1) * Math.log(1 + eff * w.volume[m]), 0), 0);
 }
-function buildPlan(profile, eq, opts, compact) {
+function buildPlan(profile, eq, opts, compact, splitIn) {
   const blockIndex = opts.blockIndex || 0;
   const volumeAdjust = opts.volumeAdjust || 0;
-  const split = scheduleSplit(getSplit(profile), profile); // Wochentage passend zum Zusatzsport
+  const split = splitIn || planSplit(profile); // Wochentage: feste Krafttage bzw. passend zum Zusatzsport
   const L = clamp(Number(profile.mesoLength) || 6, 4, 8);
   const budget = opts.budgetOverride != null ? opts.budgetOverride : (Number(profile.sessionMin) || 60);
   const rx = rxOpts(profile);
@@ -2490,7 +2540,7 @@ function buildPlan(profile, eq, opts, compact) {
 
   const plan = {
     id: uidGen('p'), createdAt: new Date().toISOString(), blockIndex, volumeAdjust,
-    split: { key: split.key, name: split.name }, mesoLength: L,
+    split: { key: split.key, name: split.name, days: split.days.slice(), offsets: split.offsets.slice() }, mesoLength: L,
     experience: profile.experience, sessionMin: budget, corridor, weeks,
     swaps: Object.assign({}, opts.swaps || {}), warnings: [], info: [],
     rx, sportV: 2, sport: hasSport(profile.extraSport) ? profile.extraSport.type : 'none', scheduled: !!split.scheduled, compact: !!compact
@@ -2935,13 +2985,10 @@ function testSport(errors, full) {
     const before = errors.length;
     checkPlan(plan, profile, deepClone(base), time >= 999 && !inj.length && c.split3 !== 'ppl', errors, label);
     const sd = sportDays(s), w0 = plan.weeks[0];
-    // Wochentage: nie schlechter als das Standardmuster, keine doppelten Tage
-    const types = w0.days.map(d => d.type), wds = w0.days.map(d => d.weekday);
+    // Wochentage: keine doppelten Tage, nie Beine/Ganzkörper am Tag vor dem Handball oder am Spieltag
+    const wds = w0.days.map(d => d.weekday);
     if (new Set(wds).size !== wds.length) E(`${label}: zwei Einheiten am selben Wochentag`);
-    const std = getSplit(profile), stdPen = std.days.reduce((a, k, i) => a + schedulePenalty(DAY_TEMPLATES[k].type, std.offsets[i], sd), 0);
-    const pen = types.reduce((a, t, i) => a + schedulePenalty(t, wds[i], sd), 0);
-    if (pen > stdPen + 1e-9) E(`${label}: Wochentage ungünstiger als Standard (${pen} > ${stdPen})`);
-    if (sd.match != null && w0.days.some(d => LEG_TYPES.includes(d.type) && d.weekday === sd.match)) E(`${label}: Beintag am Spieltag`);
+    w0.days.forEach(d => { if (LEG_TYPES.includes(d.type) && legBlocked(d.weekday, sd)) E(`${label}: ${d.name} (${WEEKDAYS[d.weekday]}) vor dem Handball`); });
     // Sprungkraft: höchstens 2 Tage, nur an Bein-/Ganzkörpertagen, nie bei Knie-/Sprunggelenkbeschwerden
     const pDays = w0.days.filter(d => (d.power || []).length);
     if (pDays.length > 2) E(`${label}: Sprungkraft an ${pDays.length} Tagen`);
@@ -2955,6 +3002,30 @@ function testSport(errors, full) {
       if (ex.category === 'compound' && regionOf(ex) === 'lower' && plan.rx.legsMinRIR && e.rir < plan.rx.legsMinRIR) E(`${label}: ${ex.id} mit RIR ${e.rir}`);
     })));
     if (errors.length > before + 20) errors.splice(before + 20);
+  }
+  // Feste Krafttage: genau diese Tage, Einheiten vor dem Handball ohne Beine, 48 h eingehalten (checkPlan)
+  [[0, 2, 4], [0, 1, 2], [4, 5, 6], [0, 2, 4, 6], [0, 1, 4, 5], [0, 1, 2, 3, 4], [0, 1, 2, 4, 5, 6], [2, 5]].forEach(gym => [{ days: [1, 3], match: null }, { days: [1, 3], match: 5 }, { days: [], match: null }].forEach(sch => {
+    const s = { type: sch.days.length ? 'handball' : 'none', days: sch.days, match: sch.match, intensity: 2, power: true, prevention: true };
+    const profile = { experience: 'intermediate', days: gym.length, split3: 'fullbody', sessionMin: 999, mesoLength: 6, focus: [], injuries: [], dayMode: 'fixed', gymDays: gym, extraSport: s };
+    const plan = generatePlan(profile, deepClone(base), { budgetOverride: 999 });
+    const label = `[Feste Tage ${gym.map(i => WEEKDAYS[i]).join('/')}, Handball ${sch.days.map(i => WEEKDAYS[i]).join('/') || '–'}${sch.match != null ? ' Spiel ' + WEEKDAYS[sch.match] : ''}]`;
+    const sd = sportDays(s), w0 = plan.weeks[0];
+    if (w0.days.map(d => d.weekday).join() !== gym.join()) E(`${label}: Wochentage ${w0.days.map(d => WEEKDAYS[d.weekday]).join('/')} statt der gewählten`);
+    w0.days.forEach(d => { if (LEG_TYPES.includes(d.type) && legBlocked(d.weekday, sd)) E(`${label}: ${d.name} am ${WEEKDAYS[d.weekday]} vor dem Handball`); });
+    if (!w0.days.some(d => LEG_TYPES.includes(d.type)) && gym.some(g => !legBlocked(g, sd))) E(`${label}: kein Beintag, obwohl ein freier Tag gewählt ist`);
+    checkPlan(plan, profile, deepClone(base), false, errors, label);
+  }));
+  // „Heute“: vor dem Handball eine Einheit ohne Beine, nach Beinen gestern keine Beine
+  {
+    const s = { type: 'handball', days: [1, 3], match: null, intensity: 2, power: true, prevention: true };
+    const profile = { experience: 'intermediate', days: 3, split3: 'fullbody', sessionMin: 75, mesoLength: 6, focus: [], injuries: [], dayMode: 'flex', gymDays: [], extraSport: s };
+    const plan = generatePlan(profile, deepClone(base), {}); plan.done = {}; plan.skipped = {};
+    const types = plan.weeks[0].days.map(d => d.type);
+    if (!types.some(t => !LEG_TYPES.includes(t))) E('Spontan mit Handball: keine Einheit ohne Beine im Plan');
+    const mo = pickForToday(plan, profile, 0, new Set());
+    if (LEG_TYPES.includes(plan.weeks[0].days[mo.day].type)) E('Heute (Mo, morgen Handball): Einheit mit Beinen gewählt');
+    const fr = pickForToday(plan, profile, 4, new Set(['quads', 'hamstrings', 'glutes']));
+    if (plan.weeks[0].days[fr.day].entries.some(e => ['quads', 'hamstrings', 'glutes'].includes(EX[e.exId].primary[0])) && plan.weeks[0].days.some(d => !LEG_TYPES.includes(d.type))) E('Heute: Beine trotz Beintag gestern');
   }
   // Reduktion wirkt: weniger Beinvolumen als ohne Sport, Oberkörper unverändert
   const p0 = { experience: 'intermediate', days: 4, sessionMin: 999, mesoLength: 6, focus: [], injuries: [], extraSport: { type: 'none' } };
@@ -3467,12 +3538,14 @@ function obSteps(ob) {
 function defaultSport() { return { type: 'none', units: 2, intensity: 2, throwJump: false, prevention: true, power: true, days: [], match: null }; }
 function newOnboarding(editing) {
   const p = state.profile ? deepClone(state.profile) : {
-    goal: 'hypertrophy', strengthSecondary: false, experience: null, days: 4, sessionMin: 75, split3: 'fullbody', mesoLength: 6,
+    goal: 'hypertrophy', strengthSecondary: false, experience: null, days: 4, sessionMin: 75, split3: 'fullbody', mesoLength: 6, dayMode: 'flex', gymDays: [],
     focus: [], injuries: [], injuryNote: '', age: '', sex: '', heightCm: '', weightKg: '', bodyFatPct: '',
     extraSport: defaultSport(), parq: { any: null, answers: PARQ.map(() => null) }
   };
   if (!p.parq) p.parq = { any: null, answers: PARQ.map(() => null) };
   p.extraSport = Object.assign(defaultSport(), p.extraSport || {});
+  if (!p.dayMode) p.dayMode = 'flex';
+  if (!Array.isArray(p.gymDays)) p.gymDays = [];
   ['age', 'heightCm', 'weightKg', 'bodyFatPct'].forEach(k => { if (p[k] == null) p[k] = ''; });
   return { v: 2, step: 0, editing: !!editing, data: p, eq: deepClone(state.equipment), accepted: !!state.disclaimerAccepted, error: null };
 }
@@ -3511,10 +3584,28 @@ function weekStrip(days, sd, opt = {}) {
   return `<div class="week-strip" role="list">${cells}</div>
     <div class="week-legend" aria-hidden="true"><span><i style="background:var(--accent)"></i>Oberkörper</span><span><i style="background:color-mix(in srgb, var(--accent) 55%, var(--hero-3))"></i>Beine / Ganzkörper</span>${sport ? `<span><i style="background:var(--energy-soft);border:1px solid var(--energy)"></i>${esc(opt.sportName || 'Sport')}</span>${sd.match != null ? '<span>🏆 Spiel</span>' : ''}` : ''}</div>`;
 }
+/* Erklärung unter der Wochenleiste: was wo liegt und warum */
+function weekNote(pv, sd, fixed) {
+  const legDays = pv.days.filter(x => LEG_TYPES.includes(x.type)).length;
+  const parts = [];
+  if (hasSportDays(sd)) parts.push('Am Tag vor dem Handball gibt es nur Oberkörper');
+  if (fixed && hasSportDays(sd) && legDays < 2) parts.push(legDays ? 'Beine sind damit 1× pro Woche im Kraftraum dran – dazu kommt das Handballtraining' : 'Mit diesen Tagen bleibt kein Beintag – wähle einen Tag, der nicht direkt vor dem Handball liegt');
+  if (!fixed) parts.push('Die Tage sind nur ein Beispiel – an deinem Trainingstag wählt die App die passende Einheit');
+  return esc(parts.join('. ') + '.');
+}
 /* Vorschau der Woche aus einem (Entwurfs-)Profil */
-function previewWeek(p) {
-  const sp = scheduleSplit(getSplit(p), p);
-  return { split: sp, days: sp.days.map((k, i) => ({ type: DAY_TEMPLATES[k].type, name: DAY_TEMPLATES[k].name, weekday: sp.offsets[i] })) };
+const _previewCache = new Map();
+function previewWeek(p, eq) {
+  const e = eq || (ui.onboarding && ui.onboarding.eq) || state.equipment;
+  const key = JSON.stringify([p.days, p.dayMode, p.gymDays, p.split3, p.sessionMin, p.experience, p.mesoLength, p.extraSport, p.focus, p.injuries, p.strengthSecondary, e]);
+  if (!_previewCache.has(key)) {
+    let sp;
+    try { sp = generatePlan(Object.assign({}, p, { experience: p.experience || 'beginner', days: Number(p.days) || 3, sessionMin: Number(p.sessionMin) || 60, mesoLength: Number(p.mesoLength) || 6 }), e, {}).split; }
+    catch (err) { sp = planSplit(p); }
+    if (_previewCache.size > 30) _previewCache.clear();
+    _previewCache.set(key, { split: sp, days: sp.days.map((k, i) => ({ type: DAY_TEMPLATES[k].type, name: DAY_TEMPLATES[k].name, weekday: sp.offsets[i] })) });
+  }
+  return _previewCache.get(key);
 }
 /* Was ändert der Zusatzsport am Plan? (Onboarding und Plan-Ansicht) */
 function sportEffects(p) {
@@ -3531,8 +3622,8 @@ function sportEffects(p) {
   if (upRed.length) out.push(li('💪', `<strong>${esc(minus(upRed))} Satz pro Woche</strong> – ${f.throw ? 'beim Werfen schon gefordert' : 'macht der Sport schon mit'}.`));
   if (rx.legs) out.push(li('🏋️', `<strong>Bein-Grundübungen schwerer, mit weniger Wiederholungen</strong> – Maximalkraft ist die Basis für Sprungkraft und Antritt.${rx.legsMinRIR ? ' Mit Luft nach oben, damit die Beine frisch bleiben.' : ''}`));
   if (f.jump && s.power !== false) out.push(li('⚡', `<strong>Sprungkraft 2× pro Woche</strong>, ca. 5 Min direkt nach dem Aufwärmen${s.type === 'handball' ? ' – z. B. einbeiniger Absprung wie beim Sprungwurf' : ''}.`));
-  if (sd.train.length || sd.match != null) out.push(li('📅', '<strong>Beintage mit Abstand:</strong> nicht am Spieltag und möglichst nicht am Tag davor.'));
-  else out.push(li('📅', 'Tipp: Wähl deine Trainingstage – dann legt die App die Beintage mit Abstand zu Training und Spiel.'));
+  if (sd.train.length || sd.match != null) out.push(li('📅', `<strong>Am Tag vor dem ${esc(sp.name)} nie Beine oder Ganzkörper</strong> – dann gibt es Oberkörper. Möglichst auch nicht am ${esc(sp.name)}-Tag selbst.`));
+  else out.push(li('📅', `Tipp: Wähl deine ${esc(sp.name)}-Tage – dann legt die App Beintage nie auf den Tag davor.`));
   if ((f.throw || f.jump) && s.prevention) out.push(li('🛡️', `<strong>Prävention</strong> für ${[f.throw ? 'Wurfschulter' : '', f.jump ? 'Waden, Sprunggelenk und Adduktoren' : ''].filter(Boolean).join(', ')} – leicht und optional.`));
   return `<ul class="effect-list">${out.join('')}</ul>`;
 }
@@ -3607,18 +3698,27 @@ function viewOnboarding() {
       ${f.throw || f.jump ? `<label class="switch"><span class="sw-text">Verletzungsprävention<small>${f.throw ? 'Schulter' : ''}${f.throw && f.jump ? ', ' : ''}${f.jump ? 'Knie und Sprunggelenk' : ''} – leicht, optional</small></span><input type="checkbox" data-ob-sport="prevention" ${s.prevention ? 'checked' : ''}></label>` : ''}
       <div class="card soft" style="margin:16px 0 0"><h3>So passt Muskelplan deinen Plan an</h3>${sportEffects(d)}</div>` : ''}`;
   } else if (id === 'training') {
-    const pv = previewWeek(d), s = d.extraSport;
-    body = `<h2>Wie viel Zeit hast du?</h2>
-      <p class="ob-lead">Du gibst die Zeit vor – Muskelplan holt das Maximum daraus heraus.</p>
-      <fieldset><legend>Krafttraining pro Woche</legend>${segRadio('days', [2, 3, 4, 5, 6].map(v => ({ v, l: v + '×' })), d.days, 'data-ob="days"')}</fieldset>
+    const pv = previewWeek(d), s = d.extraSport, sd = sportDays(s), fixed = d.dayMode === 'fixed', gd = (d.gymDays || []).map(Number);
+    const blockedSel = fixed ? gd.filter(i => legBlocked(i, sd)) : [];
+    body = `<h2>Wann trainierst du?</h2>
+      <p class="ob-lead">Du bestimmst die Tage und die Zeit – Muskelplan holt das Maximum daraus heraus.</p>
+      <div class="toggle2" role="radiogroup" aria-label="Krafttage" style="margin-bottom:8px">
+        <label><input type="radio" name="dayMode" value="flex" data-ob="dayMode" ${fixed ? '' : 'checked'}><span>Spontan</span></label>
+        <label><input type="radio" name="dayMode" value="fixed" data-ob="dayMode" ${fixed ? 'checked' : ''}><span>Feste Tage</span></label>
+      </div>
+      <p class="hint" style="margin:0 0 16px">${fixed ? 'Tipp deine Krafttage an. Die App verteilt die Einheiten so, dass am Tag vor dem Handball kein Bein- oder Ganzkörpertraining liegt.' : `Du trainierst, wann es passt. Die App wählt jeden Tag die passende Einheit${hasSportDays(sd) ? ' – vor dem ' + esc(SPORTS[s.type].name) + ' automatisch Oberkörper' : ''}.`}</p>
+      ${fixed ? `<fieldset><legend>Deine Krafttage</legend>
+        <div class="seg days">${WEEKDAYS.map((w, i) => `<label class="${sd.train.includes(i) || sd.match === i ? 'hb' : ''}"><input type="checkbox" data-ob-gday="${i}" ${gd.includes(i) ? 'checked' : ''} ${!gd.includes(i) && gd.length >= 6 ? 'disabled' : ''} aria-label="${w}${sd.train.includes(i) ? ', Handball-Tag' : sd.match === i ? ', Spieltag' : ''}"><span>${w}</span></label>`).join('')}</div>
+        <div class="hint">${gd.length ? `= ${gd.length}× Krafttraining pro Woche` : 'Wähle 2 bis 6 Tage.'}${hasSportDays(sd) ? ` · <span style="color:var(--energy);font-weight:600">orange</span> = ${esc(SPORTS[s.type].name)}` : ''}${blockedSel.length ? ` · ${blockedSel.map(i => WEEKDAYS[i]).join(', ')}: nur Oberkörper (Tag vor dem ${esc(SPORTS[s.type].name)})` : ''}</div></fieldset>`
+      : `<fieldset><legend>Krafttraining pro Woche</legend>${segRadio('days', [2, 3, 4, 5, 6].map(v => ({ v, l: v + '×' })), d.days, 'data-ob="days"')}</fieldset>`}
       <fieldset><legend>Zeit pro Einheit</legend>${segRadio('sessionMin', SESSION_OPTIONS.map(v => ({ v, l: v === 105 ? '90+' : v + ' Min' })), d.sessionMin, 'data-ob="sessionMin"')}
       <div class="hint">Aufwärmen und Cooldown sind schon eingerechnet${wantsPower(d) ? ', Sprungkraft auch' : ''}. Ist die Zeit knapp, plant die App kürzere (aber ausreichende) Pausen und kombiniert kleine Übungen – so passt möglichst viel Training hinein.</div></fieldset>
-      ${Number(d.days) === 3 ? `<fieldset><legend>Aufteilung bei 3 Tagen</legend><div class="opt-list">
+      ${Number(d.days) === 3 && !fixed && !hasSportDays(sd) ? `<fieldset><legend>Aufteilung bei 3 Tagen</legend><div class="opt-list">
         <label class="opt"><input type="radio" name="split3" value="fullbody" data-ob="split3" ${d.split3 !== 'ppl' ? 'checked' : ''}><span><span class="opt-title">Ganzkörper A/B/C <span class="chip accent">empfohlen</span></span><span class="opt-desc">Jeder Muskel 2–3× pro Woche.</span></span></label>
         <label class="opt"><input type="radio" name="split3" value="ppl" data-ob="split3" ${d.split3 === 'ppl' ? 'checked' : ''}><span><span class="opt-title">Push/Pull/Beine</span><span class="opt-desc">Jeder Muskel nur 1× pro Woche – bringt meist weniger.</span></span></label></div></fieldset>` : ''}
-      <div class="card soft" style="margin:6px 0 14px"><div class="row between" style="margin-bottom:10px"><h3 style="margin:0">Deine Woche</h3><span class="chip">${esc(pv.split.name)}</span></div>
-        ${weekStrip(pv.days, sportDays(s), { sportIcon: hasSport(s) ? SPORTS[s.type].icon : '', sportName: hasSport(s) ? SPORTS[s.type].name : '' })}
-        <p class="hint" style="margin-bottom:0">Die Tage sind Vorschläge – du kannst jederzeit eine andere Einheit wählen.</p></div>
+      ${!fixed || gd.length >= 2 ? `<div class="card soft" style="margin:6px 0 14px"><div class="row between" style="margin-bottom:10px"><h3 style="margin:0">${fixed ? 'Deine Woche' : 'Beispielwoche'}</h3><span class="chip">${esc(pv.split.name)}</span></div>
+        ${weekStrip(pv.days, sd, { sportIcon: hasSport(s) ? SPORTS[s.type].icon : '', sportName: hasSport(s) ? SPORTS[s.type].name : '' })}
+        <p class="hint" style="margin-bottom:0">${weekNote(pv, sd, fixed)}</p></div>` : ''}
       <details class="fold"><summary><strong>Erweitert</strong>${icon('chev', 'chev')}</summary><div class="fold-body">
         <label class="switch"><span class="sw-text">Kraft als Nebenziel<small>Langhantel-Grundübungen etwas schwerer, mit weniger Wiederholungen</small></span><input type="checkbox" data-ob="strengthSecondary" ${d.strengthSecondary ? 'checked' : ''}></label>
         <fieldset style="margin-top:10px"><legend>Blocklänge</legend>${segRadio('mesoLength', [4, 5, 6, 7, 8].map(v => ({ v, l: v + ' Wo.' })), d.mesoLength, 'data-ob="mesoLength"')}
@@ -3675,6 +3775,7 @@ function validateObStep() {
   switch (obSteps(ob)[ob.step]) {
     case 'start': return ob.accepted ? null : 'Bitte bestätige kurz den Hinweis.';
     case 'health': return parqAnswered(d.parq) ? null : 'Bitte wähle eine Antwort.';
+    case 'training': return d.dayMode === 'fixed' && !((d.gymDays || []).length >= 2 && d.gymDays.length <= 6) ? 'Bitte wähle 2 bis 6 Krafttage.' : null;
     case 'about': {
       if (!d.experience) return 'Bitte wähle deine Trainingserfahrung.';
       const chk = (v, a, b, name) => (v === '' || v == null) ? null : (isNaN(parseNum(v)) || parseNum(v) < a || parseNum(v) > b ? `${name}: bitte einen Wert zwischen ${a} und ${b} eingeben.` : null);
@@ -3687,8 +3788,10 @@ function sanitizeProfile(d) {
   const n = v => (v === '' || v == null || isNaN(parseNum(v)) ? null : parseNum(v));
   const s = Object.assign(defaultSport(), d.extraSport || {});
   const sd = sportDays(s);
+  const gym = d.dayMode === 'fixed' ? [...new Set((d.gymDays || []).map(Number))].sort((a, b) => a - b) : [];
   return Object.assign({}, d, {
-    days: Number(d.days), sessionMin: Number(d.sessionMin), mesoLength: Number(d.mesoLength),
+    dayMode: gym.length >= 2 ? 'fixed' : 'flex', gymDays: gym.length >= 2 ? gym : [],
+    days: gym.length >= 2 ? gym.length : Number(d.days), sessionMin: Number(d.sessionMin), mesoLength: Number(d.mesoLength),
     age: n(d.age), heightCm: n(d.heightCm), weightKg: n(d.weightKg), bodyFatPct: n(d.bodyFatPct),
     parq: { any: d.parq.any == null ? parqFlagged(d.parq) : !!d.parq.any, answers: (d.parq.answers || []).slice(), flagged: parqFlagged(d.parq) },
     extraSport: Object.assign(s, { days: sd.train, match: sd.match, units: sportUnits(s) || Number(s.units) || 0, intensity: Number(s.intensity) || 1 })
@@ -3728,7 +3831,47 @@ function finishOnboarding() {
 /* =====================================================================
    UI · Heute
    ===================================================================== */
-/* Welche Einheit zeigt „Heute“? Die nächste fällige – oder die, die du stattdessen gewählt hast */
+/* Welche offene Einheit der aktuellen Woche passt heute am besten?
+   Kriterien: keine Beine/Ganzkörper am Tag vor dem Handball (bzw. Spiel), möglichst nicht am Handball-Tag selbst,
+   keine Muskeln, die in den letzten 48 h belastet wurden, an freien Tagen bevorzugt Beine (Oberkörper bleibt für die
+   Tage vor dem Handball), sonst die Reihenfolge des Plans. */
+function pickForToday(plan, profile, wd, recent) {
+  const nx = nextSession(plan);
+  if (!nx) return null;
+  const wk = plan.weeks[nx.week], sd = sportDays(profile && profile.extraSport);
+  const blocked = legBlocked(wd, sd), same = sd.train.includes(wd), sport = hasSportDays(sd);
+  const open = wk.days.map((d, i) => ({ d, i })).filter(o => !plan.done[sessionKey(nx.week, o.i)] && !(plan.skipped || {})[sessionKey(nx.week, o.i)]);
+  const legOpen = open.some(o => LEG_TYPES.includes(o.d.type)), upOpen = open.some(o => !LEG_TYPES.includes(o.d.type));
+  const overlap = o => [...new Set(o.d.entries.flatMap(e => (EX[e.exId] ? EX[e.exId].primary : [])))].filter(m => recent.has(m) && MUSCLES[m] && MUSCLES[m].f != null);
+  const score = o => {
+    const leg = LEG_TYPES.includes(o.d.type);
+    let sc = o.i * 0.1;
+    if (leg && blocked) sc += 100;
+    if (leg && same) sc += 20;
+    if (overlap(o).length) sc += 30;
+    if (sport && !leg && legOpen && !blocked && !same) sc += 5;
+    return sc;
+  };
+  const best = open.slice().sort((a, b) => score(a) - score(b))[0];
+  const first = open.find(o => o.i === nx.day) || open[0];
+  let reason = '';
+  if (best.i !== first.i) {
+    const name = profile && hasSport(profile.extraSport) ? SPORTS[profile.extraSport.type].name : 'Sport';
+    if (LEG_TYPES.includes(first.d.type) && blocked) reason = `${sd.match === (wd + 1) % 7 ? 'Morgen ist Spiel' : `Morgen ist ${name}`} – deshalb heute ${best.d.name} statt Beine.`;
+    else if (LEG_TYPES.includes(first.d.type) && same) reason = `Heute ist auch ${name} – deshalb ${best.d.name} statt Beine.`;
+    else if (overlap(first).length && !overlap(best).length) reason = `${muscleList(overlap(first))} ${overlap(first).length === 1 ? 'braucht' : 'brauchen'} noch Erholung – heute passt ${best.d.name}.`;
+    else if (sport) reason = `Heute ist ein guter Tag für ${best.d.name} – der Oberkörper passt besser vor dem ${name}.`;
+  }
+  return { week: nx.week, day: best.i, auto: best.i !== nx.day, reason, legWarn: LEG_TYPES.includes(best.d.type) && blocked, upOpen };
+}
+/* In den letzten 48 h belastete Hauptmuskeln */
+function recentMuscles(hours = 48) {
+  const set = new Set();
+  state.logs.filter(l => (Date.now() - new Date(l.date).getTime()) / 36e5 < hours)
+    .forEach(l => l.exercises.forEach(x => { if (x.sets.length && EX[x.exId]) EX[x.exId].primary.forEach(m => set.add(m)); }));
+  return set;
+}
+/* Welche Einheit zeigt „Heute“? Die von dir gewählte – sonst die, die heute am besten passt */
 function todaySession(plan) {
   const nx = nextSession(plan);
   if (!nx) return null;
@@ -3737,7 +3880,7 @@ function todaySession(plan) {
     if (plan.weeks[w] && plan.weeks[w].days[d] && !plan.done[sessionKey(w, d)]) return { week: w, day: d, picked: true };
     ui.todayPick = null;
   }
-  return nx;
+  return pickForToday(plan, state.profile, todayWd(), recentMuscles()) || nx;
 }
 function viewToday() {
   if (state.active) return viewWorkout();
@@ -3771,7 +3914,7 @@ function viewToday() {
   <section class="hero" aria-labelledby="heroTitle">
     <div class="eyebrow">Woche ${nx.week + 1} von ${plan.weeks.length} · Einheit ${nx.day + 1} von ${wk.days.length}</div>
     <div class="hero-title" id="heroTitle">${esc(day.name)}</div>
-    <div class="hero-tags">${wk.deload ? '<span class="hero-tag">Erholungswoche</span>' : ''}${home ? `<span class="hero-tag">${icon('home')} Zuhause</span>` : ''}${changed ? '<span class="hero-tag">heute angepasst</span>' : ''}${power.length ? `<span class="hero-tag hot">⚡ Sprungkraft</span>` : ''}<span class="hero-tag">${nx.picked ? 'selbst gewählt' : WEEKDAYS[day.weekday] + ' empfohlen'}</span></div>
+    <div class="hero-tags">${wk.deload ? '<span class="hero-tag">Erholungswoche</span>' : ''}${home ? `<span class="hero-tag">${icon('home')} Zuhause</span>` : ''}${changed ? '<span class="hero-tag">heute angepasst</span>' : ''}${power.length ? `<span class="hero-tag hot">⚡ Sprungkraft</span>` : ''}<span class="hero-tag">${nx.picked ? 'selbst gewählt' : fixedGymDays(state.profile) ? (day.weekday === todayWd() ? 'heute geplant' : WEEKDAYS[day.weekday] + ' geplant') : 'passt zu heute'}</span></div>
     <div class="hero-stats">
       <div class="hero-stat"><b>${shown.estMin || day.estMin}</b><span>Minuten</span></div>
       <div class="hero-stat"><b>${shown.entries.length}</b><span>Übungen</span></div>
@@ -3780,6 +3923,7 @@ function viewToday() {
     <button type="button" class="hero-cta" data-action="start-workout" data-w="${nx.week}" data-d="${nx.day}">${icon('play')} Training starten</button>
     <div class="hero-foot"><span>Block ${plan.blockIndex + 1}</span><div class="hero-bar" aria-hidden="true"><span style="width:${pct}%"></span></div><span>${pct} % geschafft</span></div>
   </section>
+  ${nx.reason ? `<div class="notice info"><strong>Passend zu heute</strong>${esc(nx.reason)}</div>` : ''}
   ${sportTodayHint(day, plan, nx)}
   ${fat.flag ? `<div class="notice warn"><strong>Erschöpfungszeichen</strong>${esc(fat.text)}<div class="row" style="margin-top:8px"><button type="button" class="btn sm" data-action="early-deload">Erholungswoche vorziehen</button></div></div>` : ''}
   ${restHint(shown)}
@@ -3803,17 +3947,14 @@ function viewToday() {
   ${tagesformCard(day, lim, ad, ci)}
   ${lastLog ? `<div class="card soft"><div class="eyebrow">Letzte Einheit</div><p style="margin:0"><strong>${esc(lastLog.dayName)}</strong> · ${fmtDate(lastLog.date, { weekday: 'short', day: '2-digit', month: '2-digit' })} · ${lastLog.durationMin} Min · ${lastLog.exercises.reduce((a, x) => a + x.sets.length, 0)} Sätze${(lastLog.prs || []).length ? ` · 🏆 ${lastLog.prs.length} Rekord${lastLog.prs.length > 1 ? 'e' : ''}` : ''}</p></div>` : ''}`;
 }
-/* Hinweis, wenn die heutige Einheit mit dem Zusatzsport kollidiert (Spiel, Training) */
+/* Hinweis, wenn die heutige Einheit trotzdem mit dem Zusatzsport kollidiert (z. B. nur noch Beintage offen) */
 function sportTodayHint(day, plan, nx) {
   const s = state.profile && state.profile.extraSport;
   if (!hasSport(s)) return '';
-  const sd = sportDays(s), wd = todayWd(), tomorrow = (wd + 1) % 7, name = SPORTS[s.type].name, leg = LEG_TYPES.includes(day.type);
-  const upper = plan.weeks[nx.week].days.findIndex((d, i) => !LEG_TYPES.includes(d.type) && !plan.done[sessionKey(nx.week, i)] && !(plan.skipped || {})[sessionKey(nx.week, i)]);
-  const btn = leg && upper >= 0 ? `<div class="row" style="margin-top:8px"><button type="button" class="btn sm" data-action="pick-session" data-w="${nx.week}" data-d="${upper}">Stattdessen ${esc(plan.weeks[nx.week].days[upper].name)}</button></div>` : '';
+  const sd = sportDays(s), wd = todayWd(), name = SPORTS[s.type].name, leg = LEG_TYPES.includes(day.type);
   if (sd.match === wd) return `<div class="notice energy"><strong>🏆 Heute ist Spieltag</strong>Heute lieber kein Krafttraining – viel Erfolg! Die Einheit läuft dir nicht weg.</div>`;
-  if (leg && sd.match === tomorrow) return `<div class="notice energy"><strong>Morgen ist Spiel</strong>Schwere Beine sind vor einem Spiel ungünstig. Nimm heute lieber eine Oberkörper-Einheit oder mach Pause.${btn}</div>`;
-  if (leg && sd.train.includes(wd)) return `<div class="notice info"><strong>Heute auch ${esc(name)}</strong>Beine und ${esc(name)} am selben Tag sind viel. Wenn es geht: Kraft vormittags, ${esc(name)} abends – oder heute eine Oberkörper-Einheit.${btn}</div>`;
-  if (leg && sd.train.includes(tomorrow)) return `<div class="notice info"><strong>Morgen ${esc(name)}-Training</strong>Nach einem Beintag können die Beine morgen noch schwer sein. Wenn dir das lieber ist, nimm heute eine Oberkörper-Einheit.${btn}</div>`;
+  if (leg && legBlocked(wd, sd)) return `<div class="notice energy"><strong>${sd.match === (wd + 1) % 7 ? 'Morgen ist Spiel' : `Morgen ist ${esc(name)}`}</strong>Diese Woche sind nur noch Einheiten mit Beinen offen. Heute lieber Pause machen und die Einheit an einem anderen Tag nachholen.</div>`;
+  if (leg && sd.train.includes(wd)) return `<div class="notice info"><strong>Heute auch ${esc(name)}</strong>Beine und ${esc(name)} am selben Tag sind viel. Wenn es geht: Kraft vormittags, ${esc(name)} abends – oder heute pausieren.</div>`;
   return '';
 }
 /* Hinweis zur Heim-Einheit: was sie ausmacht und was man braucht */
@@ -4204,6 +4345,7 @@ function viewPlan() {
   <div class="card">
     <div class="data-chips" style="margin-bottom:12px"><span class="chip">${wk.days.length}× pro Woche</span><span class="chip">${plan.sessionMin >= 105 ? '90+' : plan.sessionMin} Min</span><span class="chip">${plan.mesoLength} Wochen</span>${sport ? `<span class="chip energy">${sport.icon} ${esc(sport.name)}</span>` : ''}</div>
     ${weekStrip(strip, sd, sopt)}
+    <p class="hint" style="margin-bottom:0">${fixedGymDays(p) ? (hasSportDays(sd) ? 'Deine festen Krafttage – am Tag vor dem ' + esc(sport.name) + ' nur Oberkörper.' : 'Deine festen Krafttage.') : `Beispielwoche – du trainierst, wann es passt. Unter „Heute“ wählt die App jeden Tag die passende Einheit${hasSportDays(sd) ? ', vor dem ' + esc(sport.name) + ' immer ohne Beine' : ''}.`}</p>
   </div>
   ${outdated ? `<div class="notice energy"><strong>${sport.icon} ${esc(sport.name)} noch genauer einplanen</strong>Muskelplan kann deinen Sport jetzt besser berücksichtigen: weniger Beinvolumen, Sprungkraft und Beintage mit Abstand zu Training und Spiel.${sd.train.length || sd.match != null ? '' : ' Trag dafür am besten auch deine Trainingstage ein.'}
     <div class="row" style="margin-top:10px">${sd.train.length || sd.match != null ? '' : `<button type="button" class="btn sm" data-action="edit-profile" data-step="sport">Trainingstage eintragen</button>`}<button type="button" class="btn sm primary" data-action="regen-plan">Plan neu berechnen</button></div></div>` : ''}
@@ -4250,7 +4392,7 @@ function dayCard(plan, w, d, di, nx) {
   const isNext = nx && nx.week === w && nx.day === di;
   const leg = LEG_TYPES.includes(d.type);
   return `<details class="card day-card" ${isNext || (!nx && di === 0) ? 'open' : ''}>
-    <summary><span class="day-badge ${done ? 'done' : leg ? 'leg' : ''}" aria-hidden="true"><small>Tag ${di + 1}</small>${WEEKDAYS[d.weekday]}</span>
+    <summary><span class="day-badge ${done ? 'done' : leg ? 'leg' : ''}" aria-hidden="true">${fixedGymDays(state.profile) ? `<small>Tag ${di + 1}</small>${WEEKDAYS[d.weekday]}` : `<small>Tag</small>${di + 1}`}</span>
       <div class="day-head"><h3>${esc(d.name)} ${done ? '<span class="chip ok">erledigt</span>' : skipped ? '<span class="chip">übersprungen</span>' : isNext ? '<span class="chip accent">als Nächstes</span>' : ''}</h3>
       <div class="meta">ca. ${d.estMin} Min · ${d.entries.length} Übungen · ${d.entries.reduce((a, e) => a + e.sets, 0)} Sätze${(d.power || []).length ? ' · ⚡ Sprungkraft' : ''}</div></div>${icon('chev', 'chev')}</summary>
     <div class="day-body">
@@ -4635,7 +4777,7 @@ function viewProfile() {
   ${p ? `<div class="card"><div class="card-head"><h2>Deine Angaben</h2><button type="button" class="btn sm soft" data-action="edit-profile">${icon('edit')} Bearbeiten</button></div>
     <dl class="summary-list">
       ${row('Erfahrung', esc(EXPERIENCE[p.experience].label), 'about')}
-      ${row('Training', `${p.days}× pro Woche · ${p.sessionMin >= 105 ? '90+' : p.sessionMin} Min · ${esc(getSplit(p).name)}`, 'training')}
+      ${row('Training', `${fixedGymDays(p) ? fixedGymDays(p).map(i => WEEKDAYS[i]).join(', ') : p.days + '× pro Woche, spontan'} · ${p.sessionMin >= 105 ? '90+' : p.sessionMin} Min · ${esc(state.plan ? state.plan.split.name : planSplit(p).name)}`, 'training')}
       ${row('Sport', sportTxt, 'sport')}
       ${row('Schwerpunkte', esc(muscleList(p.focus || []) || '–'), 'focus')}
       ${row('Beschwerden', esc((p.injuries || []).map(i => INJURIES[i]).join(', ') || '–') + (p.injuryNote ? ' – ' + esc(p.injuryNote) : ''), 'focus')}
@@ -4895,7 +5037,8 @@ function onChange(e) {
       else if (el.type === 'checkbox') d[k] = el.checked;
       else if (['days', 'sessionMin', 'mesoLength'].includes(k)) d[k] = Number(el.value);
       else d[k] = el.value;
-      if (['days', 'sessionMin', 'experience', 'split3', 'mesoLength'].includes(k) || k === 'accepted') { state.onboardingDraft = ob; save(); render(); return; }
+      if (k === 'dayMode' && el.value === 'fixed' && !(d.gymDays || []).length) d.gymDays = previewWeek(Object.assign({}, d, { dayMode: 'flex' })).days.map(x => x.weekday); // Vorschlag als Start
+      if (['days', 'sessionMin', 'experience', 'split3', 'mesoLength', 'dayMode'].includes(k) || k === 'accepted') { ob.error = null; state.onboardingDraft = ob; save(); render(); return; }
     } else if (el.dataset.obParqAny) {
       // Gesundheitscheck mit einer Antwort: „keiner“ = alle Fragen mit Nein beantwortet
       d.parq.any = el.value === 'yes';
@@ -4905,6 +5048,11 @@ function onChange(e) {
       const s = d.extraSport, i = Number(el.dataset.obSday), set = new Set((s.days || []).map(Number));
       if (el.checked) set.add(i); else set.delete(i);
       s.days = [...set].sort((a, b) => a - b); render();
+    } else if (el.dataset.obGday != null) {
+      const i = Number(el.dataset.obGday), set = new Set((d.gymDays || []).map(Number));
+      if (el.checked) set.add(i); else set.delete(i);
+      d.gymDays = [...set].sort((a, b) => a - b); if (d.gymDays.length >= 2) d.days = d.gymDays.length;
+      ob.error = null; render();
     } else if (el.dataset.obSmatch != null) {
       const s = d.extraSport, i = Number(el.dataset.obSmatch);
       s.match = el.checked ? i : null;
