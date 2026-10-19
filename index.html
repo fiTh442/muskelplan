@@ -488,6 +488,7 @@ tr:last-child > td, tr:last-child > th { border-bottom:0; }
 .t-rx { font-weight:650; color:var(--text); }
 .t-plates { appearance:none; border:0; background:none; padding:0; margin:0 0 4px; font:inherit; font-size:.88rem; font-weight:650; color:var(--accent-ink); cursor:pointer; text-decoration:underline; text-underline-offset:3px; min-height:32px; }
 .suggest.estimate, .suggest.adjusted { background:var(--info-soft); }
+.t-pred { font-size:.86rem; font-weight:650; color:var(--accent-ink); margin:0 0 4px; }
 .suggest .meta { margin-top:6px; }
 .steps-fold { margin-top:6px; }
 .steps-fold summary { cursor:pointer; min-height:32px; display:flex; align-items:center; }
@@ -1853,7 +1854,7 @@ function swapContext(ids, idx, extra) {
   return Object.assign({ curId: ids[idx], idx, n: ids.length, otherIds: new Set(ids.filter((_, i) => i !== idx)),
     compoundsBefore: ids.slice(0, idx).filter(id => EX[id] && EX[id].category === 'compound').length,
     doneOther: 0, skipMuscles: [], home: false, compact: false, superset: null, partnerId: null, painDay: false,
-    weekIds: new Set(), historyIds: new Set() }, extra);
+    weekIds: new Set(), historyIds: new Set(), prefs: null }, extra);
 }
 /* Spät in der Einheit: aktuelle Übung ist Isolation, ab der zweiten Hälfte, nach 3 Grundübungen oder wenn schon 3 Übungen erledigt sind */
 const isLate = (cur, c) => cur.category === 'isolation' || c.idx >= Math.max(2, Math.ceil(c.n * 0.5)) || c.compoundsBefore >= 3 || c.doneOther >= 3;
@@ -1869,7 +1870,7 @@ function swapOptions(c) {
   const rows = [];
   for (const id of pool) {
     const o = EX[id];
-    if (!o || id === curId || c.otherIds.has(id)) continue;
+    if (!o || id === curId || c.otherIds.has(id) || isAvoided(c.prefs, id)) continue;
     if (!allowedForSwap(id, c.eq, c.injuries)) continue;
     if (o.primary.some(m => c.skipMuscles.includes(m))) continue;
     const sharePat = patternsOf(id, c.home).some(k => curPats.includes(k));
@@ -1896,10 +1897,10 @@ function swapOptions(c) {
     s -= dupMove ? 15 : 0;
     s -= (o.unilateral && !cur.unilateral) ? (c.compact ? 10 : 5) : 0;
     if (c.superset) s += canSuperset(o, partner) ? 5 : -5;
-    s -= c.weekIds.has(id) ? 4 : 0; s += c.historyIds.has(id) ? 3 : 0;
+    s -= c.weekIds.has(id) ? 4 : 0; s += c.historyIds.has(id) ? 3 : 0; s += isLiked(c.prefs, id) ? 8 : 0;
     if (!fallback && !c.home && s < MIN_SCORE) continue;
     rows.push({ id, score: s, fallback, hard, heavy: isHeavy(o),
-      restricted: !!(o.needsSpotter && !c.eq.spotterAvailable),
+      restricted: !!(o.needsSpotter && !c.eq.spotterAvailable), liked: isLiked(c.prefs, id),
       breaksSuperset: !!c.superset && !canSuperset(o, partner),
       similar: familyOf(id) === familyOf(curId) && o.loadType === cur.loadType,
       similarTo: [...c.otherIds].find(x => EX[x] && familyOf(x) === familyOf(id) && EX[x].loadType === o.loadType) || null });
@@ -2177,9 +2178,22 @@ function computeTargets(profile, L, volumeAdjust) {
   }
   return { corridor, weeks };
 }
+/* Vorlieben: ausgeschlossene Übungen nur, wenn es sonst keine gibt; Lieblingsübungen zuerst */
+const prefOf = (prefs, id) => (prefs && prefs.ex && prefs.ex[id]) || null;
+const isAvoided = (prefs, id) => !!(prefOf(prefs, id) || {}).avoid;
+const isLiked = (prefs, id) => !!(prefOf(prefs, id) || {}).like;
+function prefFilter(ids, prefs) {
+  if (!prefs) return ids;
+  const ok = ids.filter(id => !isAvoided(prefs, id));
+  return ok.length ? ok : ids;
+}
 function pickExercise(pattern, idx, day, ctx) {
-  const cands = (PATTERNS[pattern] || []).filter(id => allowedInGenerator(id, ctx) && !day.entries.some(e => e.exId === id));
+  let cands = (PATTERNS[pattern] || []).filter(id => allowedInGenerator(id, ctx) && !day.entries.some(e => e.exId === id));
   if (!cands.length) return null;
+  cands = prefFilter(cands, ctx.prefs);
+  // Lieblingsübung: mindestens einmal pro Woche in ihrem Bewegungsmuster, die übrige Abwechslung bleibt
+  const liked = cands.find(id => isLiked(ctx.prefs, id) && !(ctx.likedUsed && ctx.likedUsed.has(id)));
+  if (liked) { if (ctx.likedUsed) ctx.likedUsed.add(liked); return liked; }
   return cands[((idx % cands.length) + cands.length) % cands.length];
 }
 function sortEntries(day) {
@@ -2209,7 +2223,7 @@ function buildDaySkeleton(key, di, ctx, blockIndex, swaps) {
     const rot = slot.core ? 0 : Math.floor((blockIndex + (k++ % 2)) / 2);
     const uid = `${di}-s${si}`;
     let id = null;
-    if (swaps && swaps[uid] && slot.core && allowedInGenerator(swaps[uid], ctx) && !day.entries.some(e => e.exId === swaps[uid])) id = swaps[uid];
+    if (swaps && swaps[uid] && slot.core && allowedInGenerator(swaps[uid], ctx) && !isAvoided(ctx.prefs, swaps[uid]) && !day.entries.some(e => e.exId === swaps[uid])) id = swaps[uid];
     if (!id) id = pickExercise(slot.p, slot.v + rot, day, ctx);
     if (!id) return;
     day.entries.push({ uid, exId: id, sets: 2, pattern: slot.p, core: !!slot.core, superset: null });
@@ -2298,9 +2312,9 @@ function tryAddExercise(week, m, vol, target, corridor, ctx, newDayOnly) {
     const day = week.days[di];
     if (directSetsInDay(day, m) + 2 > ctx.perSessionCap) continue;
     for (const p of pats) {
-      const cands = (PATTERNS[p] || []).filter(id => allowedInGenerator(id, ctx) && EX[id].primary.includes(m) && !day.entries.some(e => e.exId === id))
-        .map((id, i, arr) => ({ id, i: (i - Math.floor(((ctx.blockIndex || 0) + 1) / 2) % arr.length + arr.length) % arr.length, u: usedInWeek(week, id) }))
-        .sort((a, b) => (a.u - b.u) || (a.i - b.i)).map(o => o.id); // Rotation der Ergänzungsübungen pro Block
+      const cands = (PATTERNS[p] || []).filter(id => allowedInGenerator(id, ctx) && !isAvoided(ctx.prefs, id) && EX[id].primary.includes(m) && !day.entries.some(e => e.exId === id))
+        .map((id, i, arr) => ({ id, i: (i - Math.floor(((ctx.blockIndex || 0) + 1) / 2) % arr.length + arr.length) % arr.length, u: usedInWeek(week, id), l: isLiked(ctx.prefs, id) ? 0 : 1 }))
+        .sort((a, b) => (a.u - b.u) || (a.l - b.l) || (a.i - b.i)).map(o => o.id); // Rotation der Ergänzungsübungen pro Block, Lieblingsübungen zuerst
       for (const id of cands) {
         const ex = EX[id];
         const c = contrib(ex);
@@ -2699,7 +2713,7 @@ function adaptDay(day, limits, eq, profileInjuries, rx, fit) {
     else {
       // Ersatz mit denselben Regeln wie beim Tauschen; an Beschwerdetagen keine schwere Langhantel, wenn es eine andere Option gibt
       const ids = day.entries.map(o => o.exId), i = ids.indexOf(e.exId);
-      const cx = swapContext(ids, i, { eq, injuries, skipMuscles: skip, painDay: regions.length > 0, compact: !!day.compact });
+      const cx = swapContext(ids, i, { eq, injuries, skipMuscles: skip, painDay: regions.length > 0, compact: !!day.compact, prefs: fit && fit.prefs });
       cx.otherIds = new Set([...used].filter(id => id !== e.exId));
       best = adaptPick(swapOptions(cx));
       if (best && !ok(best)) best = undefined;
@@ -2896,7 +2910,7 @@ function buildPlan(profile, eq, opts, compact, splitIn) {
   const isCompact = di => (Array.isArray(compact) ? !!compact[di] : !!compact) && budgets[di] < 999;
   const rx = rxOpts(profile);
   const ctx = {
-    eq, injuries: profile.injuries || [], budget, budgets, isCompact, split, blockIndex,
+    eq, injuries: profile.injuries || [], budget, budgets, isCompact, split, blockIndex, prefs: opts.prefs || null, likedUsed: new Set(),
     perSessionCap: split.key === 'ppl3' ? 12 : 10, // max. direkte Sätze pro Muskel und Einheit (Praxis)
     freqTarget: split.key === 'ppl3' ? 1 : 2, compact: Array.isArray(compact) ? compact.some(Boolean) : !!compact
   };
@@ -3330,7 +3344,7 @@ function estStdE1RM(group, prof, risky) {
   return g[1][lvl] * prof.bodyKg * sexF * estAgeFactor(prof.age);
 }
 /* Bester gültiger Satz einer geloggten Übung → e1RM (Epley mit RIR, Beine höchstens 10 Wdh. gewertet) */
-function estSourceSets(o, sets, bodyKg, eq) {
+function estSourceSets(o, sets, bodyKg, eq, K = 30) {
   const cap = estLegs(o) ? 10 : 15, opts = loadOptions(o, eq), maxDb = Math.max(0, ...(eq.dumbbellStepsKg || []).map(Number));
   let best = null;
   (sets || []).forEach(s => {
@@ -3339,7 +3353,7 @@ function estSourceSets(o, sets, bodyKg, eq) {
     if (o.loadType === 'bodyweight' ? !(w >= 0 && w <= (o.weightable ? maxDb : 0) + 1e-9) : !opts.some(v => Math.abs(v - w) <= 0.01)) return;
     const L = effLoad(o, w, bodyKg);
     if (!(L > 0)) return;
-    const e1 = L * (1 + Math.min(reps + Math.min(rir, 3), cap) / 30);
+    const e1 = L * (1 + Math.min(reps + Math.min(rir, 3), cap) / K);
     const hi = (s.hi || o.repRange[1]);
     const lower = (o.loadType === 'dumbbell' && Math.abs(w - (loadCapOf(o, eq) || -1)) < 1e-6 && reps > hi) || (o.id.startsWith('pushup') && reps + rir > 15);
     if (!best || e1 > best.e1) best = { e1, w, reps, lower };
@@ -3374,7 +3388,7 @@ function estimateStartWeight(exId, presc, eq, logs, prof, opt = {}) {
   const cands = [];
   for (const [id, ses] of hist) {
     const o = EX[id], st = EST_EX[id];
-    const all = ses.map(h => Object.assign(estSourceSets(o, h.sets, opt.bodyAt ? opt.bodyAt(h.date) : bodyKg, srcEq) || { e1: 0 }, { date: h.date }));
+    const all = ses.map(h => Object.assign(estSourceSets(o, h.sets, opt.bodyAt ? opt.bodyAt(h.date) : bodyKg, srcEq, opt.kOf ? opt.kOf(id) : 30) || { e1: 0 }, { date: h.date }));
     const recent = all.slice(-3).filter(b => b.e1 > 0);
     if (!recent.length) continue;
     const b = recent.reduce((m, x) => (x.e1 > m.e1 ? x : m));
@@ -3412,13 +3426,13 @@ function estimateStartWeight(exId, presc, eq, logs, prof, opt = {}) {
     top = cands.slice().sort((a, b) => b.wt - a.wt)[0];
   } else if (stdT != null) { e1 = stdT; sf = 0.85; }
   else return null;
-  const denom = 1 + (nRef + r) / 30;
+  const Kt = opt.kOf ? opt.kOf(exId) : 30, denom = 1 + (nRef + r) / Kt;
   const res = { from: top ? top.id : null, fromSet: top ? top.set : null, e1, risky };
   // 7) Klimmzüge/Dips: Wiederholungen mit Körpergewicht, Zusatzlast nur mit aktivierter Zusatzlast
   if (bwEx) {
     const base = bodyKg * ex.bwFactor;
     if (!(base > 0)) return null;
-    const nBW = Math.floor(30 * (e1 / base - 1) - r) - 1;
+    const nBW = Math.floor(Kt * (e1 / base - 1) - r) - 1;
     res.bwReps = clamp(nBW, 1, hi);
     if (nBW < lo - 2 && EST_ALT[exId] && EX[EST_ALT[exId]]) res.alt = EST_ALT[exId];
     res.weight = 0;
@@ -3438,7 +3452,7 @@ function estimateStartWeight(exId, presc, eq, logs, prof, opt = {}) {
   // 6) auf echte Lasten abrunden; erwartete Wiederholungen
   const wR = roundToOption(ex, w, eq, 'down');
   if (wR == null || !(wR > 0)) return null;
-  const nExp = Math.floor(30 * (e1 / wR - 1) - r);
+  const nExp = Math.floor(Kt * (e1 / wR - 1) - r);
   res.weight = wR; res.nExp = carry ? null : nExp;
   if (!carry && nExp < lo && Math.abs(wR - opts[0]) < 1e-6) {
     if (risky && EST_ALT[exId] && EX[EST_ALT[exId]]) { res.weight = null; res.alt = EST_ALT[exId]; res.tooHeavy = true; }
@@ -3446,6 +3460,75 @@ function estimateStartWeight(exId, presc, eq, logs, prof, opt = {}) {
   }
   return res;
 }
+/* =====================================================================
+   LOGIC · Persönliche Kraftkurve
+   Standard ist Epley: Maximalkraft = Gewicht × (1 + Wdh/30). Wie viele Wiederholungen ein Gewichtssprung kostet, ist aber
+   individuell. Aus aufeinanderfolgenden Einheiten derselben Übung mit anderem Gewicht (jeweils erster Satz, Wdh. + RIR)
+   wird die persönliche Konstante K bestimmt (statt 30) – mit wenig Daten nahe am Durchschnitt. Dazu der Abfall von Satz
+   zu Satz bei gleichem Gewicht. Genutzt für Schätzungen, die Anpassung nach Satz 1 und die Prognose je Satz.
+   ===================================================================== */
+const CURVE_K0 = 30, CURVE_DROP0 = 1;
+const epleyK = (w, reps, K = CURVE_K0) => w * (1 + reps / K);
+/* K, der die beobachteten Wiederholungen nach Gewichtswechseln am besten erklärt (mit Zug zum Ausgangswert k0) */
+function fitCurveK(pairs, k0, m0) {
+  let best = k0, bestE = Infinity;
+  for (let K = 15; K <= 60; K += 0.5) {
+    let e = pairs.reduce((a, p) => { const g = p.g || 1, pred = K * (p.La * g / p.Lb - 1) + p.na * p.La * g / p.Lb, d = Math.max(-4, Math.min(4, p.nb - pred)); return a + d * d; }, 0);
+    e += m0 * Math.pow(0.11 * (K - k0), 2); // Vorwissen wie m0 Paare bei typischem 10-%-Gewichtssprung
+    if (e < bestE - 1e-9) { bestE = e; best = K; }
+  }
+  return best;
+}
+function personalCurve(logs, bodyAt) {
+  const firsts = {}, drops = [];
+  (logs || []).filter(l => !l.deload).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(l => {
+    const t = new Date(l.date).getTime(), bw = bodyAt ? bodyAt(l.date) : null;
+    (l.exercises || []).forEach(x => {
+      const ex = EX[x.exId];
+      if (!ex || ex.unit === 's' || !ex.countsToVolume || !(x.sets || []).length) return;
+      const pt = s => { const L = effLoad(ex, s.w, bw), r = Number(s.reps), q = s.rir === '' || s.rir == null ? NaN : Number(s.rir); return L > 0 && r >= 1 && r <= 40 && q >= 0 ? { L, n: r + q } : null; };
+      const p0 = pt(x.sets[0]);
+      if (!p0) return;
+      (firsts[x.exId] = firsts[x.exId] || []).push({ t, L: p0.L, n: p0.n });
+      const d = [];
+      x.sets.forEach((s, j) => { if (!j) return; const p = pt(s); if (p && Math.abs(p.L - p0.L) < 1e-6) d.push((p0.n - p.n) / j); });
+      if (d.length) drops.push(d.reduce((a, v) => a + v, 0) / d.length);
+    });
+  });
+  const pairs = { upper: [], lower: [] }, perEx = {};
+  Object.entries(firsts).forEach(([id, arr]) => {
+    // Kraftzuwachs über die Zeit herausrechnen (sonst sähe Fortschritt wie eine flache Kurve aus)
+    let r = 0;
+    if (arr.length >= 3 && arr[arr.length - 1].t - arr[0].t >= 10 * 864e5) {
+      const xs = arr.map(o => (o.t - arr[0].t) / 864e5), ys = arr.map(o => Math.log(epleyK(o.L, o.n)));
+      const mx = xs.reduce((a, v) => a + v, 0) / xs.length, my = ys.reduce((a, v) => a + v, 0) / ys.length;
+      const sxx = xs.reduce((a, v) => a + (v - mx) * (v - mx), 0), sxy = xs.reduce((a, v, k) => a + (v - mx) * (ys[k] - my), 0);
+      if (sxx > 0) r = clamp(sxy / sxx * arr.length / (arr.length + 3), 0, 0.004);
+    }
+    for (let i = 1; i < arr.length; i++) {
+      const a = arr[i - 1], b = arr[i];
+      if (b.t - a.t > 21 * 864e5 || Math.abs(a.L - b.L) / Math.max(a.L, b.L) < 0.04) continue;
+      const p = { La: a.L, na: a.n, Lb: b.L, nb: b.n, g: Math.exp(r * (b.t - a.t) / 864e5) };
+      pairs[regionOf(EX[id])].push(p); (perEx[id] = perEx[id] || []).push(p);
+    }
+  });
+  const reg = { upper: fitCurveK(pairs.upper, CURVE_K0, 4), lower: fitCurveK(pairs.lower, CURVE_K0, 4) };
+  const ex = {};
+  Object.entries(perEx).forEach(([id, ps]) => { if (ps.length >= 3) ex[id] = fitCurveK(ps, reg[regionOf(EX[id])], 3); });
+  const sorted = drops.slice().sort((a, b) => a - b), med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : CURVE_DROP0;
+  const drop = clamp((4 * CURVE_DROP0 + sorted.length * med) / (4 + sorted.length), 0, 3);
+  return { K: reg, ex, n: { upper: pairs.upper.length, lower: pairs.lower.length }, drop, nDrop: sorted.length };
+}
+let _curveCache = { key: '', val: null };
+function curveNow() {
+  const logs = (typeof state !== 'undefined' && state.logs) || [];
+  const key = logs.length + '|' + (logs.length ? logs[logs.length - 1].id : '') + '|' + ((state.body || []).length);
+  if (_curveCache.key !== key) _curveCache = { key, val: personalCurve(logs, bodyAt) };
+  return _curveCache.val;
+}
+function kFor(exId, c) { c = c || curveNow(); const ex = EX[exId]; return (c.ex && c.ex[exId]) || (ex ? c.K[regionOf(ex)] : CURVE_K0) || CURVE_K0; }
+/* Wiederholungen, die bei +10 % Gewicht verloren gehen (von 10 Wdh. aus) – zum Erklären */
+function repsLostAt10(K) { return 10 - K * ((1 + 10 / K) / 1.1 - 1); }
 /* Nach dem ersten Satz: passt das Gewicht? mode 'estimate' (geschätzt), 'start' (selbst gewählt) oder bekannte Progression.
    Ändert nur Vorschläge für die nächsten Sätze – eingetippte Werte haben immer Vorrang. */
 function adjustAfterSet(ex, st, presc, eq, opt = {}) {
@@ -3469,7 +3552,7 @@ function adjustAfterSet(ex, st, presc, eq, opt = {}) {
     const heavy = c < lo + t - 1, light = !opt.deload && c > hi + t + (opt.mode === 'start' ? 0 : 2);
     if (!heavy && !light) return null;
     if (light && !upOk) return null;
-    const want = epley(w, c) / (1 + ((lo + hi) / 2 + t) / 30);
+    const K = opt.K || CURVE_K0, want = epleyK(w, c, K) / (1 + ((lo + hi) / 2 + t) / K);
     w2 = light ? Math.max(roundToOption(ex, want, eq, 'nearest'), nextLoad(ex, w, eq) ?? w) : Math.min(roundToOption(ex, want, eq, 'down'), prevLoad(ex, w, eq) ?? w);
     // bekannte Gewichte höchstens 2 Stufen
     if (opt.mode !== 'start' && i >= 0) { const j = opts.findIndex(v => Math.abs(v - w2) < 1e-6); if (j >= 0 && Math.abs(j - i) > 2) w2 = opts[i + Math.sign(j - i) * 2]; }
@@ -3772,6 +3855,51 @@ function testSport(errors, full) {
 }
 
 /* Führt den Selbsttest aus. full=true prüft alle Kombinationen inkl. Zeitbudgets/Verletzungen/Spotter. */
+/* Vorlieben und persönliche Kraftkurve */
+function testPrefsCurve(errors) {
+  const E = m => errors.push('Vorlieben/Kraftkurve: ' + m);
+  const eq = deepClone(EQUIPMENT_PROFILE);
+  const prof = { experience: 'intermediate', days: 4, split3: 'fullbody', sessionMin: 75, mesoLength: 6, focus: [], injuries: [], extraSport: { type: 'none' } };
+  const ids = pl => new Set(pl.weeks.flatMap(w => w.days.flatMap(d => d.entries.map(e => e.exId))));
+  const p0 = generatePlan(prof, eq, {});
+  const victim = [...ids(p0)].find(id => EX[id].category === 'isolation');
+  const strip = x => { const q = deepClone(x); delete q.id; delete q.createdAt; return stableStringify(q); };
+  if (strip(generatePlan(prof, eq, { prefs: { ex: {} } })) !== strip(p0)) E('Leere Vorlieben ändern den Plan');
+  const pA = generatePlan(prof, eq, { prefs: { ex: { [victim]: { avoid: true } } } });
+  if (ids(pA).has(victim)) E(`Ausgeschlossene Übung ${victim} trotzdem eingeplant`);
+  const pat = PATTERN_KEYS.find(k => PATTERNS[k].includes(victim)), fav = PATTERNS[pat].find(id => id !== victim && allowedInGenerator(id, { eq, injuries: [] }) && !ids(p0).has(id));
+  if (fav && !ids(generatePlan(prof, eq, { prefs: { ex: { [fav]: { like: true } } } })).has(fav)) E(`Lieblingsübung ${fav} nicht eingeplant`);
+  const d = p0.weeks[0].days.find(x => x.entries.some(e => e.exId === victim)), i = d.entries.findIndex(e => e.exId === victim);
+  const alt = swapOptions(swapContext(d.entries.map(e => e.exId), i, { eq, injuries: [] })).list[0];
+  if (alt && swapOptions(swapContext(d.entries.map(e => e.exId), i, { eq, injuries: [], prefs: { ex: { [alt.id]: { avoid: true } } } })).list.some(c => c.id === alt.id)) E('Ausgeschlossene Übung beim Tauschen angeboten');
+  // Sync: neuere Angabe je Übung gewinnt
+  const a = defaultState(), b = defaultState();
+  a.prefs.ex.x1 = { avoid: true, dAt: '2026-10-02', at: '2026-10-02' }; b.prefs.ex.x1 = { avoid: false, kept: true, dAt: '2026-10-05', at: '2026-10-05' }; b.prefs.ex.x2 = { like: true, dAt: '2026-10-01' };
+  a.prefs.ex.x3 = { avoid: true, dAt: '2026-10-03', at: '2026-10-03' }; b.prefs.ex.x3 = { away: 1, at: '2026-10-09' };
+  const m = mergeStates(a, b, false);
+  if (m.prefs.ex.x1.avoid !== false || !m.prefs.ex.x2 || !m.prefs.ex.x2.like) E('Sync der Vorlieben');
+  if (!m.prefs.ex.x3.avoid) E('Sync: Zähler überschreibt Entscheidung');
+  // Ausgeschlossene Übung kommt nicht über alte Tausche zurück; Lieblingsübung höchstens die Abwechslung ergänzen
+  const core = p0.weeks[0].days[0].entries.find(e => e.core);
+  if (core) { const nb = generatePlan(prof, eq, { blockIndex: 1, swaps: { [core.uid]: core.exId }, prefs: { ex: { [core.exId]: { avoid: true } } } }); if (ids(nb).has(core.exId) && PATTERNS[core.pattern].some(id => id !== core.exId && allowedInGenerator(id, { eq, injuries: [] }))) E('Ausgeschlossene Übung über alten Tausch zurück'); }
+  if (fav) { const pl = generatePlan(prof, eq, { prefs: { ex: { [fav]: { like: true } } } }); const cnt = pl.weeks[0].days.filter(x => x.entries.some(e => e.exId === fav)).length; if (cnt > Math.max(1, p0.weeks[0].days.filter(x => x.entries.some(e => PATTERNS[pat].includes(e.exId))).length - 1)) E('Lieblingsübung verdrängt die Abwechslung'); }
+  // Kraftkurve: synthetische Logs mit bekanntem K
+  const mk = (K, exId, drop) => { const out = []; let M = 60; for (let k = 0; k < 16; k++) { const w = k % 2 ? 45 : 40, n = Math.round(K * (M / w - 1)); M *= 1.002;
+    out.push({ id: 'c' + k, date: new Date(Date.UTC(2026, 6, 1 + k * 4)).toISOString(), exercises: [{ exId, sets: [0, 1, 2].map(j => ({ w, reps: Math.max(1, n - 2 - Math.round(drop * j)), rir: 2 })) }] }); } return out; };
+  const cS = personalCurve(mk(20, 'bench-db', 2), null), cE = personalCurve(mk(42, 'bench-db', 0.5), null), c0 = personalCurve([], null);
+  // Anfänger mit Durchschnittskurve, der stetig stärker wird (Doppelprogression): kein falscher „Krafttyp“
+  const nov = []; { let M = 50, w = 30; for (let k = 0; k < 14; k++) { let n = Math.round(30 * (M / w - 1)) - 2; if (n >= 12) { w += 2.5; n = Math.round(30 * (M / w - 1)) - 2; }
+    nov.push({ id: 'n' + k, date: new Date(Date.UTC(2026, 6, 1 + k * 3)).toISOString(), exercises: [{ exId: 'bench-db', sets: [{ w, reps: n, rir: 2 }] }] }); M *= 1.02; } }
+  const cN = personalCurve(nov, null);
+  if (Math.abs(cN.K.upper - CURVE_K0) > 4) E(`Fortschritt als Kurvenform gedeutet (K ${cN.K.upper})`);
+  if (!(cS.K.upper < 26)) E(`Krafttyp nicht erkannt (K ${cS.K.upper})`);
+  if (!(cE.K.upper > 34)) E(`Ausdauertyp nicht erkannt (K ${cE.K.upper})`);
+  if (c0.K.upper !== CURVE_K0 || c0.K.lower !== CURVE_K0 || c0.drop !== CURVE_DROP0) E('Ohne Daten nicht der Durchschnitt');
+  if (!(cS.drop > 1.4) || !(cE.drop < 0.9)) E(`Satzabfall (${cS.drop}, ${cE.drop})`);
+  if (cS.K.lower !== CURVE_K0) E('Beine von Oberkörperdaten beeinflusst');
+  const a1 = adjustAfterSet(EX['curl-db'], { w: 10, reps: 15, rir: 3 }, { repRange: [8, 12], rir: 1 }, eq, { K: 20 }), a2 = adjustAfterSet(EX['curl-db'], { w: 10, reps: 15, rir: 3 }, { repRange: [8, 12], rir: 1 }, eq, { K: 45 });
+  if (!(a1 >= a2)) E('Kraftkurve wirkt nicht auf die Anpassung');
+}
 /* Training: Gewichtsschätzung, Anpassung nach Satz 1, Schritte der Fokus-Ansicht (rein, ohne App-Zustand) */
 function testWorkoutHelpers(errors) {
   const E = m => errors.push('Training: ' + m);
@@ -3927,7 +4055,7 @@ function runSelfTest(opts = {}) {
     checkPlan(plan, profile, deepClone(base), true, errors, `[Meso ${L} Wochen]`);
   });
   testProgression(errors); testPlates(errors); testInjuryFilter(errors); testEquipmentOnly(errors);
-  testWorkoutHelpers(errors);
+  testWorkoutHelpers(errors); testPrefsCurve(errors);
   if (!boot) { testSwapRules(errors, swapPlans); testTimePerDay(errors); }
   if (typeof testExportImport === 'function') testExportImport(errors);
   if (typeof testSyncMerge === 'function') testSyncMerge(errors);
@@ -3955,7 +4083,7 @@ function defaultState() {
     version: STATE_VERSION, createdAt: new Date().toISOString(), disclaimerAccepted: false,
     profile: null, equipment: deepClone(EQUIPMENT_PROFILE), plan: null,
     logs: [], active: null, body: [], checkins: [], blocks: [],
-    settings: defaultSettings(), onboardingDraft: null, dayLimits: null
+    settings: defaultSettings(), onboardingDraft: null, dayLimits: null, prefs: { ex: {} }
   };
 }
 function migrate(s) {
@@ -3967,6 +4095,7 @@ function migrate(s) {
   out.equipment.safetyArms = false; // fest: keine Sicherungsarme vorhanden
   out.settings = Object.assign(defaultSettings(), s.settings || {});
   ['logs', 'body', 'checkins', 'blocks'].forEach(k => { if (!Array.isArray(out[k])) out[k] = []; });
+  if (!out.prefs || typeof out.prefs !== 'object' || !out.prefs.ex || typeof out.prefs.ex !== 'object') out.prefs = { ex: {} };
   if (out.plan && Array.isArray(out.plan.weeks) && out.plan.weeks.some(w => (w.days || []).some(d => !Array.isArray(d.cooldown)))) {
     try { const p = deepClone(out.plan); refreshWarmCool(p, out.profile, out.equipment); out.plan = p; }
     catch (e) { /* alter Plan bleibt unverändert nutzbar */ }
@@ -4182,6 +4311,16 @@ function mergeStates(local, remote, remoteNewer) {
   const byDate = (x, y) => String(x.date).localeCompare(String(y.date));
   out.logs.sort(byDate); out.body.sort(byDate); out.checkins.sort(byDate);
   out.blocks.sort((x, y) => String(x.startedAt).localeCompare(String(y.startedAt)));
+  // Vorlieben: Entscheidungen (ausschließen/bevorzugen) nach der jüngsten Entscheidung, Zähler nach dem Maximum
+  out.prefs = { ex: deepClone(((a.prefs || {}).ex) || {}) };
+  Object.entries(((b.prefs || {}).ex) || {}).forEach(([id, v]) => {
+    const o = out.prefs.ex[id];
+    if (!o) { out.prefs.ex[id] = deepClone(v); return; }
+    const m = deepClone(String(v.dAt || '') > String(o.dAt || '') ? v : o);
+    ['awayDay', 'pickDay', 'at'].forEach(k => { m[k] = String(v[k] || '') > String(o[k] || '') ? v[k] : o[k]; });
+    if (!m.like && !m.avoid) { m.away = Math.max(v.away || 0, o.away || 0); m.picked = Math.max(v.picked || 0, o.picked || 0); }
+    out.prefs.ex[id] = m;
+  });
   if (out.plan && b.plan && out.plan.id === b.plan.id) {
     out.plan.done = Object.assign({}, b.plan.done, out.plan.done);
     out.plan.skipped = Object.assign({}, b.plan.skipped, out.plan.skipped);
@@ -4893,7 +5032,7 @@ function defaultNutrition(p) {
 }
 function createNewPlan(blockIndex, volumeAdjust, swaps, replace) {
   if (replace && state.plan) state.blocks = state.blocks.filter(b => b.planId !== state.plan.id || blockLogs(state.plan).length);
-  state.plan = generatePlan(state.profile, state.equipment, { blockIndex, volumeAdjust, swaps });
+  state.plan = generatePlan(state.profile, state.equipment, { blockIndex, volumeAdjust, swaps, prefs: state.prefs });
   state.plan.done = {}; state.plan.skipped = {};
   state.blocks.push({ planId: state.plan.id, blockIndex, startedAt: new Date().toISOString(), split: state.plan.split.name, mesoLength: state.plan.mesoLength, volumeAdjust });
   ui.planWeek = 0;
@@ -4903,14 +5042,14 @@ function createNewPlan(blockIndex, volumeAdjust, swaps, replace) {
 function retimePlan(old, profile, eq, active) {
   const prof = Object.assign({}, profile, { mesoLength: old.mesoLength });
   const split = Object.assign({}, old.split, { scheduled: !!old.scheduled });
-  const p = timeVariant(prof, eq, { blockIndex: old.blockIndex || 0, volumeAdjust: old.volumeAdjust || 0, swaps: old.swaps || {} }, split);
+  const p = timeVariant(prof, eq, { blockIndex: old.blockIndex || 0, volumeAdjust: old.volumeAdjust || 0, swaps: old.swaps || {}, prefs: typeof state !== 'undefined' ? state.prefs : null }, split);
   Object.assign(p, { id: old.id, createdAt: old.createdAt, done: Object.assign({}, old.done || {}), skipped: Object.assign({}, old.skipped || {}), swaps: Object.assign({}, old.swaps || {}), timesAt: new Date().toISOString() });
   if (old.earlyDeload) p.earlyDeload = true;
   // getauschte Übungen auch auf Neben- und Zusatzplätzen wieder einsetzen – nur, wo dasselbe Bewegungsmuster liegt
   const oldPat = {};
   old.weeks.forEach(w => w.days.forEach(d => d.entries.forEach(e => { if (!(e.uid in oldPat)) oldPat[e.uid] = e.pattern; })));
   Object.entries(old.swaps || {}).forEach(([uid, id]) => {
-    if (EX[id] && allowedForSwap(id, eq, profile.injuries || []) && p.weeks.some(w => w.days.some(d => d.entries.some(e => e.uid === uid && e.exId !== id && e.pattern === oldPat[uid])))) applyPlanSwap(uid, id, p, eq, profile);
+    if (EX[id] && allowedForSwap(id, eq, profile.injuries || []) && !isAvoided(typeof state !== 'undefined' ? state.prefs : null, id) && p.weeks.some(w => w.days.some(d => d.entries.some(e => e.uid === uid && e.exId !== id && e.pattern === oldPat[uid])))) applyPlanSwap(uid, id, p, eq, profile);
   });
   p.weeks.forEach(wk => { enforceBudget(wk, { budget: p.sessionMin }); wk.days.forEach(d => { d.estMin = Math.round(dayMinutes(d)); }); });
   // Wochen, die schon begonnen haben (erledigt oder laufend), bleiben wie geplant – offene Tage darin werden nur auf die neue Zeit gekürzt.
@@ -5063,7 +5202,7 @@ function effectiveLimits(plan, day) {
   if (auto == null) return l;
   return Object.assign({ regions: [], muscles: [] }, l || {}, { minutes: auto, date: todayISO(), auto: true });
 }
-function fitCtx(plan, w, d) { return { plan, wk: plan.weeks[w], w, di: d, profile: state.profile }; }
+function fitCtx(plan, w, d) { return { plan, wk: plan.weeks[w], w, di: d, profile: state.profile, prefs: state.prefs }; }
 /* Was hat die Zeitanpassung heute gemacht? (nur positive Formulierungen) */
 function timeText(t) {
   if (!t) return '';
@@ -5306,7 +5445,7 @@ function makeActiveExercise(entry, deload, eq = state.equipment) {
   if (sugg.kind === 'start') {
     // Noch nie gemacht: Startgewicht aus verwandten Übungen schätzen
     let e = null;
-    try { e = estimateStartWeight(entry.exId, planned, eq, state.logs, estProfile(), { srcEq: state.equipment, bodyAt }); } catch (err) { e = null; }
+    try { const c = curveNow(); e = estimateStartWeight(entry.exId, planned, eq, state.logs, estProfile(), { srcEq: state.equipment, bodyAt, kOf: id => kFor(id, c) }); } catch (err) { e = null; }
     if (e) sugg = estimateSugg(sugg, e, ex, planned, eq);
     else if (showWeightInput(ex) && canAdjust(ex)) sugg = Object.assign({}, sugg, { text: sugg.text + ' Nach Satz 1 schlägt die App das Gewicht für die nächsten Sätze vor.' });
   }
@@ -5667,6 +5806,28 @@ function altBtn(x, i) {
   if (cx.otherIds.has(s.alt) || !allowedForSwap(s.alt, cx.eq, cx.injuries)) return '';
   return ` <button type="button" class="btn sm ghost" data-action="swap-direct" data-x="${i}" data-id="${s.alt}" data-plan="0">Heute ${esc(EX[s.alt].name)}</button>`;
 }
+/* Prognose je Satz aus der persönlichen Kraftkurve: Basis ist ein heute schon abgehakter Satz, sonst der erste Satz der letzten Einheit */
+function predictReps(x) {
+  const ex = EX[x.exId];
+  if (!ex || ex.unit === 's' || !ex.countsToVolume || ex.loadType === 'kettlebell') return null;
+  const c = curveNow(), K = kFor(x.exId, c), bw = bodyWeight(), t = Number(x.planned.rir) || 0;
+  const nOf = s => Number(s.reps) + (s.rir === '' || s.rir == null ? t : Number(s.rir));
+  let base = null;
+  x.sets.forEach((s, j) => { if (s.done) { const L = effLoad(ex, parseNum(s.w), bw); if (L > 0 && Number(s.reps) > 0) base = { e1: epleyK(L, nOf(s), K), j }; } });
+  if (!base) {
+    const h = exerciseHistory(x.exId).filter(o => !o.deload);
+    const s0 = h.length ? h[h.length - 1].sets[0] : null, L0 = s0 ? effLoad(ex, parseNum(s0.w), bodyAt(h[h.length - 1].date)) : 0;
+    if (!s0 || !(L0 > 0) || !(Number(s0.reps) > 0)) return null;
+    base = { e1: epleyK(L0, nOf(s0), K), j: -1 };
+  }
+  return x.sets.map((s, j) => {
+    if (s.done || s.skipped || j <= base.j) return null;
+    const wv = parseNum(s.w), L = isNaN(wv) ? NaN : effLoad(ex, wv, bw);
+    if (!(L > 0)) return null;
+    const r = Math.round(K * (base.e1 / L - 1) - t - c.drop * (j - Math.max(0, base.j)));
+    return r >= 1 && r <= 40 ? r : null;
+  });
+}
 /* Großer Zielwert: Gewicht × Wiederholungen · RIR – das Wichtigste zuerst */
 function targetBlock(x, i, ex, eq) {
   const s = x.sugg || {}, p = x.planned, showW = showWeightInput(ex), reps = s.reps || p.repRange;
@@ -5685,14 +5846,15 @@ function targetBlock(x, i, ex, eq) {
   return `<div class="suggest ${esc(x.adj ? 'adjusted' : s.kind || '')}">
     <div class="t-head">${esc(x.adj ? `Angepasst nach Satz ${x.adj.set || 1}` : s.title || 'Vorgabe')}</div>
     <div class="target">${main}</div>${plates}
+    ${(() => { const pr = predictReps(x), v = (pr || []).filter(r => r != null); return v.length >= 2 ? `<div class="t-pred">Deine Prognose: ${v.map(r => '≈ ' + r).join(' · ')} ${unitLabel(ex)}</div>` : ''; })()}
     ${s.text ? `<div class="small">${esc(s.text)}${altBtn(x, i)}</div>` : ''}
     <div class="meta">${esc(lastSessionText(x.exId))}</div>
     ${adjLine(x, i)}${stepsList(x, i)}</div>`;
 }
 function setRow(x, i, j, showW) {
-  const ex = EX[x.exId], st = x.sets[j], p = x.planned;
+  const ex = EX[x.exId], st = x.sets[j], p = x.planned, pr = (x._pred !== undefined ? x._pred : predictReps(x)) || [];
   return `${showW ? `<input type="text" inputmode="decimal" aria-label="Gewicht Satz ${j + 1}${x.letter || ''}" data-wx="${i}" data-ws="${j}" data-wf="w" value="${esc(st.w)}" ${st.skipped ? 'disabled' : ''}>` : ''}
-      <input type="text" inputmode="numeric" aria-label="${unitLabel(ex)} Satz ${j + 1}${x.letter || ''}" data-wx="${i}" data-ws="${j}" data-wf="reps" value="${esc(st.reps)}" placeholder="${p.repRange[0]}–${p.repRange[1]}" ${st.skipped ? 'disabled' : ''}>
+      <input type="text" inputmode="numeric" aria-label="${unitLabel(ex)} Satz ${j + 1}${x.letter || ''}" data-wx="${i}" data-ws="${j}" data-wf="reps" value="${esc(st.reps)}" placeholder="${pr[j] != null ? '≈ ' + pr[j] : p.repRange[0] + '–' + p.repRange[1]}" ${st.skipped ? 'disabled' : ''}>
       <select aria-label="RIR Satz ${j + 1}${x.letter || ''}" data-wx="${i}" data-ws="${j}" data-wf="rir" ${st.skipped ? 'disabled' : ''}>${['', 0, 1, 2, 3, 4, 5].map(v => `<option value="${v}" ${String(st.rir) === String(v) ? 'selected' : ''}>${v === '' ? '–' : v}</option>`).join('')}</select>`;
 }
 function exerciseCard(x, i, warmMode, info) {
@@ -5715,11 +5877,11 @@ function exerciseCard(x, i, warmMode, info) {
     ${restricted ? '<div class="notice warn small"><strong>Ohne Partner/Sicherungsarme</strong>Nur mit RIR ≥ 3 – nie bis ans Versagen. Ohne Klemmen trainieren.</div>' : ''}
     ${wu.length ? `<p class="warm-list"><strong>Aufwärmsätze:</strong> ${wu.map(w => `${fmtKg(w.kg)} × ${w.reps}`).join(' · ')}</p>` : ''}
     <div class="set-grid ${showW ? '' : 'no-w'} set-head" aria-hidden="true"><span>Satz</span>${showW ? `<span>${ex.loadType === 'bodyweight' ? '+kg' : 'kg'}${ex.loadType === 'dumbbell' ? ' je KH' : ''}</span>` : ''}<span>${unitLabel(ex)}</span><span>RIR</span><span></span></div>
-    ${x.sets.map((st, j) => `<div class="set-grid set-row ${showW ? '' : 'no-w'} ${st.done ? 'done' : ''} ${st.skipped ? 'skipped' : ''}">
+    ${(() => { const xp = Object.assign({}, x, { _pred: predictReps(x) }); return x.sets.map((st, j) => `<div class="set-grid set-row ${showW ? '' : 'no-w'} ${st.done ? 'done' : ''} ${st.skipped ? 'skipped' : ''}">
       <span class="set-no">${j + 1}${st.pr ? '<br><span class="pr-flag" title="Neuer Rekord">PR</span>' : ''}</span>
-      ${setRow(x, i, j, showW)}
+      ${setRow(xp, i, j, showW)}
       <button type="button" class="check-btn" data-action="set-done" data-x="${i}" data-s="${j}" aria-pressed="${st.done}" aria-label="Satz ${j + 1} ${st.done ? 'als offen markieren' : 'abhaken'}" ${st.skipped ? 'disabled' : ''}>${icon('check')}</button>
-    </div>`).join('')}
+    </div>`).join(''); })()}
     <div class="ex-tools">
       <button type="button" class="btn sm soft" data-action="timer-start" data-x="${i}">${icon('timer')} Pause</button>
       <button type="button" class="btn sm ghost" data-action="add-set" data-x="${i}">${icon('plus')} Satz</button>
@@ -5820,7 +5982,7 @@ function markSetDone(i, j) {
     if (showWeightInput(ex) && canAdjust(ex) && kind && kind !== 'none') {
       // Wiederholungs-Brücke: deren Zielbereich gilt, sonst würde sofort der große Sprung kommen
       const presc = kind === 'bridge' && x.sugg.reps ? Object.assign({}, x.planned, { repRange: [x.planned.repRange[0], x.sugg.reps[1]] }) : x.planned;
-      const w2 = adjustAfterSet(ex, st, presc, activeEq(a), { mode: kind === 'estimate' ? 'estimate' : kind === 'start' ? 'start' : 'known', risky: estRisky(x.exId, ex), deload: !!x.planned.deload });
+      const w2 = adjustAfterSet(ex, st, presc, activeEq(a), { mode: kind === 'estimate' ? 'estimate' : kind === 'start' ? 'start' : 'known', risky: estRisky(x.exId, ex), deload: !!x.planned.deload, K: kFor(x.exId) });
       if (w2 != null) {
         x.sets.forEach((o, k) => { if (k !== j && !o.done && !o.skipped && sameW(o.w, st.w)) o.w = w2; });
         x.adj = { from: st.w, to: w2, dir: w2 > st.w ? 'up' : 'down', set: j + 1 };
@@ -6073,7 +6235,7 @@ function workoutSwapCtx(a, i, withPlan) {
     eq: activeEq(a), injuries: [...new Set([...((state.profile && state.profile.injuries) || []), ...regions])],
     skipMuscles: (a.limits && a.limits.muscles) || [], home: !!a.home, compact: !!a.compact,
     superset: pk >= 0 ? x.planned.superset : null, partnerId: pk >= 0 ? a.exercises[pk].exId : null, painDay: regions.length > 0,
-    doneOther: a.exercises.filter((o, k) => k !== i && o.sets.some(s => s.done)).length, historyIds: historyIdSet() });
+    doneOther: a.exercises.filter((o, k) => k !== i && o.sets.some(s => s.done)).length, historyIds: historyIdSet(), prefs: state.prefs });
   a.exercises.forEach((o, k) => { if (k !== i) cx.otherIds.add(o.exId); });
   if (withPlan && state.plan && a.planId === state.plan.id) planDayIds(state.plan, x.uid).forEach(id => cx.otherIds.add(id));
   return cx;
@@ -6082,7 +6244,7 @@ function planSwapCtx(plan, w, d, uid) {
   const day = plan.weeks[w].days[d], idx = day.entries.findIndex(e => e.uid === uid), e = day.entries[idx];
   const p = e && e.superset ? day.entries.find(o => o !== e && o.superset === e.superset) : null;
   const cx = swapContext(day.entries.map(o => o.exId), idx, { eq: state.equipment, injuries: (state.profile && state.profile.injuries) || [], compact: !!day.compact,
-    superset: p ? e.superset : null, partnerId: p ? p.exId : null, historyIds: historyIdSet(),
+    superset: p ? e.superset : null, partnerId: p ? p.exId : null, historyIds: historyIdSet(), prefs: state.prefs,
     weekIds: new Set(plan.weeks[w].days.filter((_, k) => k !== d).flatMap(o => o.entries.map(z => z.exId))) });
   planDayIds(plan, uid).forEach(id => cx.otherIds.add(id));
   return cx;
@@ -6098,8 +6260,57 @@ function swapWeightHint(id, presc, eq) {
   if (!showWeightInput(ex) || ex.unit === 's') return '';
   const h = exerciseHistory(id).filter(o => !o.deload);
   if (h.length) return 'zuletzt ' + weightTxt(ex, typicalWeight(h[h.length - 1].sets));
-  try { const e = estimateStartWeight(id, presc, eq, state.logs, estProfile(), { srcEq: state.equipment, bodyAt }); if (e && e.weight > 0) return 'Schätzung ' + weightTxt(ex, e.weight); } catch (err) { /* ohne Hinweis */ }
+  try { const c = curveNow(); const e = estimateStartWeight(id, presc, eq, state.logs, estProfile(), { srcEq: state.equipment, bodyAt, kOf: k => kFor(k, c) }); if (e && e.weight > 0) return 'Schätzung ' + weightTxt(ex, e.weight); } catch (err) { /* ohne Hinweis */ }
   return '';
+}
+/* ---------- Vorlieben merken ----------
+   An zwei verschiedenen Tagen weggetauscht → wird nicht mehr eingeplant; zweimal als Ersatz gewählt → Lieblingsübung. */
+function prefEntry(id) { state.prefs = state.prefs && state.prefs.ex ? state.prefs : { ex: {} }; return (state.prefs.ex[id] = state.prefs.ex[id] || { away: 0, picked: 0 }); }
+function notePrefSwap(fromId, toId) {
+  const day = todayISO(), now = new Date().toISOString(), out = { msgs: [], avoided: null };
+  const f = prefEntry(fromId);
+  if (f.awayDay !== day) { f.away = (f.away || 0) + 1; f.awayDay = day; f.at = now; }
+  if (f.like && f.auto && f.away >= 2) { f.like = false; f.auto = false; f.picked = 0; f.away = 0; f.dAt = now; out.msgs.push(`${EX[fromId].name} ist keine Lieblingsübung mehr.`); }
+  else if (f.away >= 2 && !f.avoid && !f.like && !f.kept) { f.avoid = true; f.auto = true; f.dAt = now; out.avoided = fromId; out.msgs.push(`Gemerkt: ${EX[fromId].name} plane ich künftig nicht mehr ein (änderbar im Profil).`); }
+  const t = prefEntry(toId);
+  if (t.pickDay !== day) { t.picked = (t.picked || 0) + 1; t.pickDay = day; t.at = now; }
+  if (t.avoid) { t.avoid = false; t.dAt = now; }
+  if (t.picked >= 2 && !t.like && !t.disliked) { t.like = true; t.auto = true; t.away = 0; t.dAt = now; out.msgs.push(`${EX[toId].name} merke ich mir als Lieblingsübung.`); }
+  return out;
+}
+/* Ausgeschlossene Übung auch aus den offenen Einheiten des aktuellen Plans nehmen */
+function avoidInPlan(id) {
+  const plan = state.plan;
+  if (!plan) return 0;
+  const uids = new Map();
+  plan.weeks.forEach((wk, w) => wk.days.forEach((d, di) => d.entries.forEach(e => { if (e.exId === id && !uids.has(e.uid) && !plan.done[sessionKey(w, di)]) uids.set(e.uid, [w, di]); })));
+  let n = 0;
+  Object.keys(plan.swaps || {}).forEach(u => { if (plan.swaps[u] === id) delete plan.swaps[u]; });
+  uids.forEach(([w, di], uid) => {
+    const best = adaptPick(swapOptions(planSwapCtx(plan, w, di, uid)));
+    if (best && !applyPlanSwap(uid, best)) n++;
+  });
+  return n;
+}
+function setPref(id, key, on) {
+  const e = prefEntry(id);
+  e[key] = !!on; e.auto = false; e.dAt = new Date().toISOString();
+  if (key === 'avoid' && on) e.like = false;
+  if (key === 'like' && on) e.avoid = false;
+  if (key === 'avoid' && !on) { e.kept = true; e.away = 0; }
+  if (key === 'like' && !on) { e.disliked = true; e.picked = 0; }
+}
+function prefsCard() {
+  const ex = (state.prefs && state.prefs.ex) || {};
+  const av = Object.keys(ex).filter(id => ex[id].avoid && EX[id]), lk = Object.keys(ex).filter(id => ex[id].like && EX[id]);
+  const row = (id, key, label) => `<li class="ex-li"><span class="ex-body"><span class="ex-name">${esc(EX[id].name)}</span><span class="ex-sub">${esc(muscleList(EX[id].primary))}${ex[id].auto ? ' · automatisch gemerkt' : ''}</span></span><button type="button" class="btn sm ghost" data-action="pref-off" data-id="${id}" data-v="${key}">${label}</button></li>`;
+  return `<details class="card fold" ${ui.prefOpen ? 'open' : ''} data-details="prefOpen"><summary><div><h2>Vorlieben</h2><div class="card-sub">${av.length || lk.length ? `${av.length} ausgeschlossen · ${lk.length} bevorzugt` : 'Die App merkt sich, was du gern machst'}</div></div>${icon('chev', 'chev')}</summary>
+    <div class="fold-body">
+      <p class="hint" style="margin-top:0">Tauschst du eine Übung an zwei verschiedenen Tagen aus, plant die App sie nicht mehr ein. Wählst du eine Übung öfter als Ersatz, wird sie bevorzugt. Im Tausch-Dialog kannst du eine Übung auch sofort ausschließen.</p>
+      <h3>Nicht mehr einplanen</h3>${av.length ? `<ul class="ex-list">${av.map(id => row(id, 'avoid', 'Wieder erlauben')).join('')}</ul>` : '<p class="muted small">Noch keine.</p>'}
+      <h3>Bevorzugt</h3>${lk.length ? `<ul class="ex-list">${lk.map(id => row(id, 'like', 'Nicht mehr bevorzugen')).join('')}</ul>` : '<p class="muted small">Noch keine.</p>'}
+      <p class="hint" style="margin-bottom:0">Gilt für neue Pläne und Blöcke sowie für die Tauschvorschläge.</p>
+    </div></details>`;
 }
 function openSwap(ctx) {
   const inWorkout = ctx.kind === 'workout', a = state.active;
@@ -6124,7 +6335,7 @@ function openSwap(ctx) {
   const r = swapOptions(cx), eq = cx.eq;
   ui.swapCtx = ctx;
   const badges = c => [c.fallback ? (c.hard ? '<span class="chip warn">anstrengender – nur wenn nichts anderes geht, RIR 2–3</span>' : '<span class="chip">Ausweichübung</span>') : '',
-    c.restricted ? '<span class="chip warn">ohne Spotter nur RIR ≥ 3</span>' : '', c.breaksSuperset ? '<span class="chip">Supersatz wird aufgelöst</span>' : '',
+    c.liked ? '<span class="chip ok">Favorit</span>' : '', c.restricted ? '<span class="chip warn">ohne Spotter nur RIR ≥ 3</span>' : '', c.breaksSuperset ? '<span class="chip">Supersatz wird aufgelöst</span>' : '',
     c.similar ? '<span class="chip">ähnlich</span>' : c.similarTo ? `<span class="chip">ähnlich wie ${esc(EX[c.similarTo].name)}</span>` : ''].filter(Boolean).join(' ');
   const rows = r.list.map(c => {
     const ex = EX[c.id], hint = swapWeightHint(c.id, presc(c.id), eq);
@@ -6139,6 +6350,7 @@ function openSwap(ctx) {
   openDialog(`${closeBtn()}<h2 id="dlgTitle">Übung ersetzen</h2>
     <p class="muted small">Aktuell: <strong>${esc(cur.name)}</strong> (${esc(muscleList(cur.primary))}). Angeboten wird nur, was ${inWorkout && a.home ? 'zuhause ohne Equipment' : 'mit deinem Equipment'} geht, heute noch nicht dran ist und an diese Stelle der Einheit passt.</p>
     ${planBox ? `<label class="switch"><span class="sw-text">Auch im Plan für den restlichen Block ersetzen</span><input type="checkbox" id="swapPlan" ${ctx.alsoPlan ? 'checked' : ''}></label>` : ''}
+    <label class="switch"><span class="sw-text">${esc(cur.name)} künftig nicht mehr einplanen<small>Gilt auch für die offenen Einheiten dieses Blocks</small></span><input type="checkbox" id="swapAvoid" ${ctx.avoid ? 'checked' : ''}></label>
     ${doneN ? `<div class="notice info small">Deine ${doneN} abgehakten ${doneN === 1 ? 'Satz bleibt' : 'Sätze bleiben'} gespeichert – die neue Übung bekommt die restlichen ${openN} ${openN === 1 ? 'Satz' : 'Sätze'}.</div>` : ''}
     <ul class="clean swap-list">${skipRow}${rows}</ul>
     ${r.list.length ? '' : '<p class="small">Keine passende Alternative für diese Stelle.</p>'}`);
@@ -6151,16 +6363,28 @@ function swapOmit() {
   if (!x) return;
   if (x.sets.some(s => s.done)) x.sets.forEach(s => { if (!s.done) s.skipped = true; });
   else setExOmitted(a, ctx.x, true);
+  const avoid = !!ctx.avoid;
+  if (avoid) { setPref(x.exId, 'avoid', true); avoidInPlan(x.exId); }
   ui.swapCtx = null; closeDialog(); save(); render();
-  toast(`${EX[x.exId].name} heute ausgelassen – in der Übersicht wieder reinholbar.`);
+  toast(`${EX[x.exId].name} heute ausgelassen${avoid ? ' und künftig nicht mehr eingeplant' : ' – in der Übersicht wieder reinholbar'}.`);
 }
 function doSwap(newId) {
   const ctx = ui.swapCtx;
   if (!ctx || !EX[newId]) return;
+  const oldId = ctx.kind === 'plan' ? ctx.exId : state.active && state.active.exercises[ctx.x] && state.active.exercises[ctx.x].exId;
+  // Vorlieben: nur bei bewusstem Tausch im Dialog (nicht bei Lastgrenze oder Schätzung)
+  const afterSwap = () => {
+    if (ctx.direct || !oldId || oldId === newId) return;
+    const r = notePrefSwap(oldId, newId);
+    if (ctx.avoid) { setPref(oldId, 'avoid', true); r.avoided = oldId; r.msgs.unshift(`${EX[oldId].name} plane ich nicht mehr ein.`); }
+    if (r.avoided) avoidInPlan(r.avoided);
+    r.msgs.forEach(m => toast(m, 4500));
+  };
   if (ctx.kind === 'plan') {
     const err = applyPlanSwap(ctx.uid, newId);
     if (err) { toast(err); return; }
     toast(`Ersetzt durch ${EX[newId].name} (alle Wochen).`);
+    afterSwap();
   } else {
     const a = state.active, x = a && a.exercises[ctx.x];
     if (!x) return;
@@ -6189,6 +6413,7 @@ function doSwap(newId) {
       a.focus = 'x' + (ctx.x + 1);
     } else { nx.notes = x.notes; a.exercises[ctx.x] = nx; }
     toast(`Ersetzt durch ${EX[newId].name}${alsoPlan ? ' (auch im Plan)' : ''}.`);
+    afterSwap();
   }
   ui.swapCtx = null;
   closeDialog(); save(); render();
@@ -6291,6 +6516,16 @@ function loggedVolume(logs) {
   logs.forEach(l => l.exercises.forEach(x => { const c = contrib(EX[x.exId]); for (const m in c) if (m in v) v[m] += c[m] * x.sets.length; }));
   return v;
 }
+/* Persönliche Kraftkurve in Alltagssprache */
+function curveCard() {
+  const c = curveNow(), n = c.n.upper + c.n.lower;
+  const typ = K => (K >= 33 ? 'eher Ausdauertyp: Mehr Gewicht kostet dich vergleichsweise viele Wiederholungen, kleine Gewichtssprünge passen am besten' : K <= 27 ? 'eher Krafttyp: Mehr Gewicht kostet dich vergleichsweise wenige Wiederholungen' : 'etwa wie der Durchschnitt');
+  const line = (label, r) => `<li><strong>${label}:</strong> ${c.n[r] >= 2 ? `Bei +10 % Gewicht verlierst du etwa ${fmtNum(Math.round(repsLostAt10(c.K[r]) * 10) / 10, 1)} Wiederholungen (Durchschnitt: ${fmtNum(Math.round(repsLostAt10(CURVE_K0) * 10) / 10, 1)}) – ${typ(c.K[r])}.` : 'noch zu wenig Gewichtswechsel – die App rechnet mit Durchschnittswerten.'}</li>`;
+  return `<details class="card fold" data-details="curveOpen" ${ui.curveOpen ? 'open' : ''}><summary><div><h2>Deine Kraftkurve</h2><div class="card-sub">${n === 1 ? 'aus einem Gewichtswechsel gelernt' : n ? `aus ${n} Gewichtswechseln gelernt` : 'lernt mit jedem Training dazu'}</div></div>${icon('chev', 'chev')}</summary>
+    <div class="fold-body"><ul class="list" style="margin-top:0">${line('Oberkörper', 'upper')}${line('Beine', 'lower')}
+      <li><strong>Von Satz zu Satz:</strong> ${c.nDrop >= 3 ? (c.drop < 0.5 ? 'Bei gleichem Gewicht schaffst du im nächsten Satz meist etwa gleich viele Wiederholungen.' : `Bei gleichem Gewicht schaffst du im nächsten Satz im Schnitt etwa ${fmtNum(Math.round(c.drop * 10) / 10, 1)} ${Math.round(c.drop * 10) === 10 ? 'Wiederholung' : 'Wiederholungen'} weniger.`) : 'noch zu wenig Daten.'}</li></ul>
+    <p class="hint" style="margin-bottom:0">Damit rechnet die App Gewichtsvorschläge, die Anpassung nach Satz 1 und die Prognose „≈“ bei jedem Satz. Je mehr du mit Wiederholungen und RIR einträgst, desto genauer wird sie.</p></div></details>`;
+}
 function viewProgress() {
   const logs = state.logs.slice().sort((a, b) => a.date.localeCompare(b.date));
   const plan = state.plan;
@@ -6330,6 +6565,7 @@ function viewProgress() {
     <div class="stat"><div class="v">${logs.reduce((a, l) => a + (l.prs || []).length, 0)}</div><div class="l">Rekorde (PR)</div></div>
   </div>
   ${plan ? evaluationCard(plan) : ''}
+  ${curveCard()}
   <div class="card"><h2>Konsistenz</h2>${heatmap(16)}<p class="hint">Jedes Kästchen ist ein Tag der letzten 16 Wochen; farbig = Training.</p></div>
   <div class="card"><h2>Kraftentwicklung</h2><p class="card-sub" style="margin-bottom:10px">Geschätztes Maximalgewicht für 1 Wiederholung</p>
     ${exIds.length ? `<div class="field"><label for="progEx">Übung</label><select id="progEx" data-ui="progEx">${exIds.map(id => `<option value="${id}" ${id === ui.progEx ? 'selected' : ''}>${esc(EX[id].name)}</option>`).join('')}</select></div>
@@ -6487,6 +6723,7 @@ function viewProfile() {
     <span class="ex-idx warm" aria-hidden="true">${icon('book')}</span>
     <span class="lc-text"><strong>Grundlagen</strong><span class="muted small">Wie Muskelplan plant – kurz erklärt</span></span>${icon('right', 'lc-chev')}</button>
 
+  ${state.profile ? prefsCard() : ''}
   <details class="card fold" ${ui.eqOpen ? 'open' : ''} data-details="eqOpen"><summary><div><h2>Mein Equipment</h2><div class="card-sub">${EXERCISES.filter(ex => ex.countsToVolume && isExerciseAvailable(ex, eq)).length} passende Übungen</div></div>${icon('chev', 'chev')}</summary>
     <div class="fold-body">
     <p class="muted small" style="margin-top:0">Der Plan nutzt nur, was hier aktiv ist. Nach Änderungen: Plan neu berechnen.</p>
@@ -6800,7 +7037,8 @@ const ACTIONS = {
       if (e) openSwap({ kind: 'plan', uid: el.dataset.uid, exId: e.exId, w, d });
     } else if (state.active) openSwap({ kind: 'workout', x: Number(el.dataset.x) });
   },
-  'swap-direct': el => { if (!state.active) return; ui.swapCtx = { kind: 'workout', x: Number(el.dataset.x), alsoPlan: el.dataset.plan !== '0' }; doSwap(el.dataset.id); },
+  'swap-direct': el => { if (!state.active) return; ui.swapCtx = { kind: 'workout', x: Number(el.dataset.x), alsoPlan: el.dataset.plan !== '0', direct: true }; doSwap(el.dataset.id); },
+  'pref-off': el => { if (!EX[el.dataset.id]) return; setPref(el.dataset.id, el.dataset.v, false); ui.prefOpen = true; save(); render(); toast(el.dataset.v === 'avoid' ? `${EX[el.dataset.id].name} ist wieder erlaubt.` : `${EX[el.dataset.id].name} wird nicht mehr bevorzugt.`); },
   'swap-plan': el => {
     const a = state.active; if (!a) return;
     const x = a.exercises[Number(el.dataset.x)]; if (!x || !EX[el.dataset.id]) return;
@@ -6991,6 +7229,7 @@ function onChange(e) {
   if (el.dataset.ui) { ui[el.dataset.ui] = el.value; render(); return; }
   if (el.dataset.ci) return;
   if (el.id === 'swapPlan' && ui.swapCtx) { ui.swapCtx.alsoPlan = el.checked; openSwap(ui.swapCtx); return; }
+  if (el.id === 'swapAvoid' && ui.swapCtx) { ui.swapCtx.avoid = el.checked; return; }
   if (el.dataset.wview && state.active) { ui.woView = el.value === 'list' ? 'list' : 'focus'; state.active.skipAsked = true; save(); render(); window.scrollTo(0, 0); return; }
   if (el.dataset.womit != null && state.active) {
     const a = state.active, k = el.dataset.womit;
@@ -7009,6 +7248,11 @@ function onInput(e) {
     const x = state.active.exercises[Number(el.dataset.wx)];
     x.sets[Number(el.dataset.ws)][el.dataset.wf] = el.value;
     el.removeAttribute('aria-invalid');
+    if (el.dataset.wf === 'w') {
+      // Prognose sofort zum neuen Gewicht passend zeigen (ohne Neuaufbau, damit der Fokus bleibt)
+      const pr = predictReps(x) || [];
+      x.sets.forEach((s, k) => { const inp = document.querySelector(`[data-wx="${el.dataset.wx}"][data-ws="${k}"][data-wf="reps"]`); if (inp) inp.placeholder = pr[k] != null ? '≈ ' + pr[k] : `${x.planned.repRange[0]}–${x.planned.repRange[1]}`; });
+    }
     save(); return;
   }
   if (el.dataset.wnotes != null && state.active) {
