@@ -456,6 +456,13 @@ tr:last-child > td, tr:last-child > th { border-bottom:0; }
 .ex-tools { display:flex; flex-wrap:nowrap; gap:6px; margin:10px -18px 0; padding:0 18px 2px; overflow-x:auto; scrollbar-width:none; }
 .ex-tools::-webkit-scrollbar { display:none; }
 .ex-tools .btn { flex:none; }
+/* Extra-Training & Auswahl */
+.preset-row { display:flex; flex-wrap:wrap; gap:8px; }
+.pick-list { max-height:44vh; overflow:auto; margin-top:8px; border-top:1px solid var(--border); }
+.pick-item { display:flex; gap:12px; align-items:center; padding:10px 2px; border-bottom:1px solid var(--border); cursor:pointer; min-height:48px; }
+.pick-item input { width:22px; height:22px; flex:none; accent-color:var(--accent); }
+.pick-item span { display:flex; flex-direction:column; min-width:0; }
+.pick-item small { color:var(--text-2); font-size:.8rem; }
 /* Zeit pro Tag */
 .time-pick { margin:10px 0 4px; }
 .time-pick legend { font-size:.9rem; }
@@ -3855,6 +3862,22 @@ function testSport(errors, full) {
 }
 
 /* Führt den Selbsttest aus. full=true prüft alle Kombinationen inkl. Zeitbudgets/Verletzungen/Spotter. */
+/* Extra-Training und Zählweise der Wiederholungen */
+function testExtras(errors) {
+  const E = m => errors.push('Extras: ' + m);
+  const eq = deepClone(EQUIPMENT_PROFILE);
+  if (repLabel(EX['curl-db']) !== 'Wdh. je Arm' || repLabel(EX['bulgarian-db']) !== 'Wdh. je Bein' || repLabel(EX['bench-db']) !== 'Wdh.' || repLabel(EX['plank']) !== 'Sek.') E('Zählweise der Wiederholungen');
+  Object.keys(EXTRA_PRESETS).forEach(k => {
+    const ids = presetExercises(k, eq);
+    if (!ids.length) E(`Vorlage ${k} leer`);
+    if (ids.some(id => !allowedForSwap(id, eq, []) || !EXTRA_PRESETS[k].muscles.includes(EX[id].primary[0]))) E(`Vorlage ${k} mit unpassender Übung`);
+    if (new Set(ids).size !== ids.length) E(`Vorlage ${k} doppelt`);
+  });
+  const ab = presetExercises('abs', eq);
+  if (ab.length !== 3 || ab.some(id => EX[id].unit === 's')) E('Bauch-Vorlage: 3 Übungen mit Wiederholungen erwartet');
+  const e = freeEntry('curl-db', 0, eq);
+  if (!(e.sets >= 2 && e.repRange && e.restSec && e.rir >= 0)) E('Eintrag für freie Übung');
+}
 /* Vorlieben und persönliche Kraftkurve */
 function testPrefsCurve(errors) {
   const E = m => errors.push('Vorlieben/Kraftkurve: ' + m);
@@ -4055,7 +4078,7 @@ function runSelfTest(opts = {}) {
     checkPlan(plan, profile, deepClone(base), true, errors, `[Meso ${L} Wochen]`);
   });
   testProgression(errors); testPlates(errors); testInjuryFilter(errors); testEquipmentOnly(errors);
-  testWorkoutHelpers(errors); testPrefsCurve(errors);
+  testWorkoutHelpers(errors); testPrefsCurve(errors); testExtras(errors);
   if (!boot) { testSwapRules(errors, swapPlans); testTimePerDay(errors); }
   if (typeof testExportImport === 'function') testExportImport(errors);
   if (typeof testSyncMerge === 'function') testSyncMerge(errors);
@@ -4518,6 +4541,13 @@ function localDay(iso) { const d = new Date(iso); d.setMinutes(d.getMinutes() - 
 function todayISO() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
 function mondayOf(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 function unitLabel(ex) { return ex.unit === 's' ? 'Sek.' : 'Wdh.'; }
+/* Wie werden Wiederholungen gezählt? Einseitig: je Seite; Kurzhanteln im Oberkörper (z. B. Curls): je Arm */
+function repLabel(ex) {
+  if (ex.unit === 's') return 'Sek.';
+  if (ex.unilateral) return regionOf(ex) === 'lower' ? 'Wdh. je Bein' : 'Wdh. je Arm';
+  if (ex.loadType === 'dumbbell' && ex.category === 'isolation' && regionOf(ex) === 'upper' && !['goblet-squat-db', 'overhead-ext-db', 'pullover-db', 'crunch-weighted'].includes(ex.id)) return 'Wdh. je Arm';
+  return 'Wdh.';
+}
 function fmtSec(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function muscleList(arr) { return arr.filter(m => MUSCLES[m]).map(m => MUSCLES[m].short).join(', '); }
 
@@ -5216,10 +5246,14 @@ function timeText(t) {
   if (more > 0) return `Heute mit ${minLabel(t.minutes)} Min: ${more} ${more === 1 ? 'Satz' : 'Sätze'} mehr${t.added.length ? ` (inkl. ${t.added.length === 1 ? 'einer Zusatzübung' : t.added.length + ' Zusatzübungen'})` : ''} – für die Muskeln, die diese Woche noch Luft haben. Fertig in ca. ${t.to} Min.`;
   return `Mehr Sätze bringen heute kaum zusätzlich – du bist in ca. ${t.to} Min fertig${t.rest === 'normal' || t.ssTo < t.ssFrom ? ', mit etwas ruhigeren Pausen' : ''}.`;
 }
+function extraCard() {
+  return `<div class="card soft extra-card"><div class="card-head"><div><h2>Extra-Training</h2><div class="card-sub">Kurz etwas zusätzlich – außerhalb des Plans</div></div></div>
+    <div class="preset-row">${Object.entries(EXTRA_PRESETS).map(([k, v]) => `<button type="button" class="btn sm soft" data-action="extra-open" data-id="${k}">${v.icon} ${esc(v.label)}</button>`).join('')}<button type="button" class="btn sm ghost" data-action="extra-open">Eigene Auswahl …</button></div></div>`;
+}
 function viewToday() {
   if (state.active) return viewWorkout();
   const plan = state.plan;
-  if (!plan) return pageHead('Heute', esc(todayLong())) + emptyState('Kein aktiver Plan', 'Erstelle einen neuen Plan aus deinem Profil.', '<button type="button" class="btn primary" data-action="regen-plan">Plan erstellen</button>');
+  if (!plan) return pageHead('Heute', esc(todayLong())) + emptyState('Kein aktiver Plan', 'Erstelle einen neuen Plan aus deinem Profil.', '<button type="button" class="btn primary" data-action="regen-plan">Plan erstellen</button>') + (state.profile ? extraCard() : '');
   const nx = todaySession(plan);
   if (!nx) return viewBlockComplete();
   const wk = plan.weeks[nx.week], day = wk.days[nx.day];
@@ -5241,7 +5275,7 @@ function viewToday() {
     const a = (ad && ad.day.entries.find(x => x.uid === e.uid)) || e, ex = EX[a.exId];
     const ssFirst = a.superset ? shown.entries.find(o => o.superset === a.superset) : null;
     return `<li class="ex-li"><span class="ex-idx">${i + 1}</span><span class="ex-body"><span class="ex-name">${a.superset ? `<span class="ss-tag">Supersatz ${ssFirst && ssFirst.uid === a.uid ? 'A' : 'B'}</span> ` : ''}${esc(ex.name)}</span><span class="ex-sub">${c ? `statt ${esc(EX[c.from].name)}` : esc(muscleList(ex.primary))}</span></span>
-      <span class="ex-dose"><b>${a.sets} × ${a.repRange[0]}–${a.repRange[1]}</b><small>${ad && ad.time && ad.time.setDiff[e.uid] ? `statt ${ad.time.setDiff[e.uid][0]} Sätze` : `${unitLabel(ex)} · RIR ${a.rir}`}</small></span></li>`;
+      <span class="ex-dose"><b>${a.sets} × ${a.repRange[0]}–${a.repRange[1]}</b><small>${ad && ad.time && ad.time.setDiff[e.uid] ? `statt ${ad.time.setDiff[e.uid][0]} Sätze` : `${repLabel(ex)} · RIR ${a.rir}`}</small></span></li>`;
   };
   const extraRows = shown.entries.filter(e => !day.entries.some(o => o.uid === e.uid)).map((e, k) => { const ex = EX[e.exId];
     return `<li class="ex-li"><span class="ex-idx">${day.entries.length + k + 1}</span><span class="ex-body"><span class="ex-name">${esc(ex.name)}</span><span class="ex-sub">heute zusätzlich · ${esc(muscleList(ex.primary))}</span></span><span class="ex-dose"><b>${e.sets} × ${e.repRange[0]}–${e.repRange[1]}</b><small>${unitLabel(ex)} · RIR ${e.rir}</small></span></li>`; }).join('');
@@ -5269,7 +5303,8 @@ function viewToday() {
     <div class="card-head" style="flex-wrap:wrap;align-items:center"><h2>Heute dran</h2>
       <label class="sr-only" for="pickSess">Andere Einheit wählen</label>
       <select id="pickSess" style="width:auto;min-height:40px;font-size:.9rem;padding:6px 10px"><option value="">Andere Einheit …</option>
-      ${wk.days.map((d, i) => `<option value="${nx.week}-${i}" ${plan.done[sessionKey(nx.week, i)] ? 'disabled' : ''} ${i === nx.day ? 'selected' : ''}>${esc(d.name)}${plan.done[sessionKey(nx.week, i)] ? ' (erledigt)' : ''}</option>`).join('')}</select></div>
+      <optgroup label="Woche ${nx.week + 1}">${wk.days.map((d, i) => { const k = sessionKey(nx.week, i), dn = plan.done[k], sk = (plan.skipped || {})[k]; return `<option value="${dn ? 'again:' : ''}${nx.week}-${i}" ${i === nx.day ? 'selected' : ''}>${esc(d.name)}${dn ? ' – nochmal als Extra' : sk ? ' (ausgelassen)' : ''}</option>`; }).join('')}</optgroup>
+      <optgroup label="Außerhalb des Plans"><option value="free">Freies Training / Extra …</option></optgroup></select></div>
     <div class="toggle2" role="radiogroup" aria-label="Wo trainierst du heute?" style="margin:8px 0 6px">
       <label><input type="radio" name="place" value="gym" data-place="1" ${home ? '' : 'checked'}><span>${icon('dumbbell')} Kraftraum</span></label>
       <label><input type="radio" name="place" value="home" data-place="1" ${home ? 'checked' : ''}><span>${icon('home')} Zuhause</span></label>
@@ -5284,7 +5319,9 @@ function viewToday() {
       ${day.entries.map(entryRow).join('')}${extraRows}
       ${day.coolMin ? sideRow('warm', 'heart', 'Cooldown', 'Runterfahren & kurz dehnen (optional)', day.coolMin) : ''}
     </ul>
+    <div class="row" style="margin-top:10px"><button type="button" class="btn sm ghost" data-action="skip-session" data-w="${nx.week}" data-d="${nx.day}">${esc(day.name)} auslassen</button></div>
   </div>
+  ${extraCard()}
   ${tagesformCard(day, lim, ad, ci)}
   ${lastLog ? `<div class="card soft"><div class="eyebrow">Letzte Einheit</div><p style="margin:0"><strong>${esc(lastLog.dayName)}</strong> · ${fmtDate(lastLog.date, { weekday: 'short', day: '2-digit', month: '2-digit' })} · ${lastLog.durationMin} Min · ${lastLog.exercises.reduce((a, x) => a + x.sets.length, 0)} Sätze${(lastLog.prs || []).length ? ` · 🏆 ${lastLog.prs.length} Rekord${lastLog.prs.length > 1 ? 'e' : ''}` : ''}</p></div>` : ''}`;
 }
@@ -5345,13 +5382,15 @@ function tagesformCard(day, lim, ad, ci) {
   </details>`;
 }
 function restHint(day) {
-  const last = state.logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+  // alle Einheiten der letzten 48 h (auch Extras) – maßgeblich ist die jüngste, die dieselben Muskeln belastet hat
+  const recent = state.logs.filter(l => (Date.now() - new Date(l.date).getTime()) / 36e5 < 48).sort((a, b) => b.date.localeCompare(a.date));
+  if (!recent.length) return '';
+  const nowM = new Set(day.entries.flatMap(e => (EX[e.exId] ? EX[e.exId].primary : [])));
+  const musclesOf = l => new Set(l.exercises.filter(x => x.sets.length && EX[x.exId]).flatMap(x => EX[x.exId].primary));
+  const last = recent.find(l => [...musclesOf(l)].some(m => nowM.has(m) && MUSCLES[m] && MUSCLES[m].f != null));
   if (!last) return '';
   const hours = (Date.now() - new Date(last.date).getTime()) / 36e5;
-  if (hours >= 48) return '';
-  const lastM = new Set(), nowM = new Set();
-  last.exercises.forEach(x => { if (x.sets.length && EX[x.exId]) EX[x.exId].primary.forEach(m => lastM.add(m)); });
-  day.entries.forEach(e => EX[e.exId].primary.forEach(m => nowM.add(m)));
+  const lastM = new Set(recent.flatMap(l => [...musclesOf(l)]));
   const overlap = [...nowM].filter(m => lastM.has(m) && MUSCLES[m] && MUSCLES[m].f != null);
   if (!overlap.length) return '';
   return `<div class="notice info"><strong>Etwas wenig Erholung</strong>Deine letzte Einheit ist erst ${Math.round(hours)} h her und hat ${esc(muscleList(overlap))} belastet. Gönn diesen Muskeln möglichst 48 h – warte noch etwas oder wähle eine andere Einheit.</div>`;
@@ -5373,7 +5412,8 @@ function viewBlockComplete() {
     <div class="hero-title">Stark! 🎉</div>
     <div class="hero-stats"><div class="hero-stat"><b>${logs.length}</b><span>Einheiten</span></div><div class="hero-stat"><b>${adapt.adherencePct} %</b><span>Regelmäßigkeit</span></div><div class="hero-stat"><b>${logs.reduce((a, l) => a + (l.prs || []).length, 0)}</b><span>Rekorde</span></div></div>
     <button type="button" class="hero-cta" data-action="new-block">Nächsten Block starten ${icon('right')}</button></section>
-    <div class="card"><h2>Für den nächsten Block</h2><p>${esc(adapt.text)}</p><p class="muted small" style="margin:0">Die Hauptübungen bleiben, ein Teil der Nebenübungen wechselt für neue Reize.</p></div>`;
+    <div class="card"><h2>Für den nächsten Block</h2><p>${esc(adapt.text)}</p><p class="muted small" style="margin:0">Die Hauptübungen bleiben, ein Teil der Nebenübungen wechselt für neue Reize.</p></div>
+    ${extraCard()}`;
 }
 function blockAdaptation(plan) {
   const logs = blockLogs(plan);
@@ -5485,6 +5525,105 @@ function startWorkout(w, d) {
   };
   ui.wuOpen = null; ui.todayPick = null; ui.woView = 'focus';
   save(true); ensureAudio(); requestWakeLock(); render(); window.scrollTo(0, 0);
+}
+/* ---------- Freies Training & Extras (außerhalb des Plans) ----------
+   Zählt nicht als Plan-Einheit, fließt aber in Verlauf, Progression und Kraftkurve ein. */
+const EXTRA_PRESETS = {
+  abs: { label: 'Bauch', icon: '🧱', muscles: ['abs'], n: 3 },
+  arms: { label: 'Arme', icon: '💪', muscles: ['biceps', 'triceps'], n: 2 },
+  shoulders: { label: 'Schultern', icon: '🎯', muscles: ['delts_side', 'delts_rear'], n: 2 },
+  calves: { label: 'Waden', icon: '🦵', muscles: ['calves'], n: 2 },
+};
+function pickerEq() { return state.active ? activeEq(state.active) : (state.dayLimits && state.dayLimits.home ? HOME_EQUIPMENT : state.equipment); }
+/* Übungen, die für freies Training infrage kommen (Equipment, Beschwerden, nicht ausgeschlossen) */
+function freeCandidates(muscle, eq) {
+  const inj = (state.profile && state.profile.injuries) || [];
+  const hist = historyIdSet();
+  return EXERCISES.filter(o => allowedForSwap(o.id, eq, inj) && !isAvoided(state.prefs, o.id) && (!muscle || o.primary.includes(muscle)))
+    .sort((a, b) => (isLiked(state.prefs, b.id) - isLiked(state.prefs, a.id)) || (hist.has(b.id) - hist.has(a.id)) || ((a.unit === 's') - (b.unit === 's')) || ((a.category === 'isolation' ? 0 : 1) - (b.category === 'isolation' ? 0 : 1)) || (patRank(a.id) - patRank(b.id)) || a.name.localeCompare(b.name, 'de'));
+}
+/* Reihenfolge in den Bewegungsmustern = bevorzugte Übungen der App */
+function patRank(id) {
+  for (const k of PATTERN_KEYS) { const i = PATTERNS[k].indexOf(id); if (i >= 0) return i; }
+  return 99;
+}
+/* Vorschlag für ein kurzes Extra: je Muskel passende Isolationsübungen (Lieblingsübungen und bekannte zuerst) */
+function presetExercises(key, eq, exclude = []) {
+  const pr = EXTRA_PRESETS[key];
+  if (!pr) return [];
+  const out = [];
+  pr.muscles.forEach(m => {
+    const per = Math.max(1, Math.round(pr.n / pr.muscles.length) + (pr.muscles.length === 1 ? 0 : 0));
+    freeCandidates(m, eq).filter(o => o.primary[0] === m && !out.includes(o.id) && !exclude.includes(o.id)).slice(0, pr.muscles.length === 1 ? pr.n : per).forEach(o => out.push(o.id));
+  });
+  return out;
+}
+/* Eintrag für eine frei gewählte Übung: Vorgaben wie im Plan (aktuelle Woche) */
+function freeDeload() { const plan = state.plan, nx = plan ? nextSession(plan) : null; return !!(nx && plan.weeks[nx.week].deload); }
+function freeEntry(id, k, eq, sets, deload) {
+  const ex = EX[id], plan = state.plan, nx = plan ? nextSession(plan) : null, w = nx ? nx.week : 0;
+  const rx = planRx(plan), dl = deload != null ? !!deload : freeDeload();
+  const rir = computeRIR(ex, w, plan ? plan.mesoLength : 6, dl, eq, rx);
+  return { uid: 'f' + k + '-' + id, exId: id, sets: sets || (dl ? 2 : 3), repRange: repRangeFor(ex, rx), restSec: restFor(ex, false), rir: eq === HOME_EQUIPMENT ? Math.min(rir, 2) : rir, superset: null };
+}
+function startFreeWorkout(ids, name) {
+  if (state.active) { toast('Es läuft schon ein Training – Übungen kannst du dort mit „+ Übung“ dazunehmen.'); return; }
+  if (!ids.length) { toast('Bitte mindestens eine Übung wählen.'); return; }
+  const eq = pickerEq(), home = eq === HOME_EQUIPMENT, plan = state.plan, nx = plan ? nextSession(plan) : null, dl = freeDeload();
+  ids = ids.filter(id => EX[id] && allowedForSwap(id, eq, (state.profile && state.profile.injuries) || []));
+  if (!ids.length) { toast('Mit dem Equipment hier passt keine dieser Übungen.'); return; }
+  const exs = ids.map((id, k) => makeActiveExercise(freeEntry(id, k, eq, null, dl), dl, eq));
+  const compound = ids.some(id => EX[id].category === 'compound');
+  const types = new Set(ids.map(id => regionOf(EX[id])));
+  const pseudo = { type: types.size > 1 ? 'FB' : types.has('lower') ? 'LO' : 'UP', entries: ids.map(id => ({ exId: id, sets: 3 })) };
+  let warmup = [];
+  try { if (compound) warmup = warmupFor(pseudo, eq, state.profile || {}, 30); } catch (e) { warmup = []; }
+  state.active = {
+    id: uidGen('l'), startedAt: new Date().toISOString(), planId: null, free: true, blockIndex: plan ? plan.blockIndex : 0,
+    week: nx ? nx.week : 0, day: null, dayName: name || 'Freies Training', deload: dl, notes: '',
+    warmup, cooldown: [], warmMin: compound ? 4 : 0, coolMin: 0, wcDone: {}, prevention: [], power: [], compact: false, home, limits: null,
+    focus: null, skipAsked: true, powerOmitted: false, exercises: exs
+  };
+  ui.woView = 'focus'; ui.picker = null;
+  closeDialog(); save(true); ensureAudio(); requestWakeLock(); go('heute'); render(); window.scrollTo(0, 0);
+}
+/* Übungen in ein laufendes Training aufnehmen (z. B. kurzes Bauchtraining am Ende) */
+function addToWorkout(ids) {
+  const a = state.active;
+  if (!a || !ids.length) return;
+  const eq = activeEq(a), have = new Set(a.exercises.map(x => x.exId)), inj = [...new Set([...((state.profile && state.profile.injuries) || []), ...((a.limits && a.limits.regions) || [])])];
+  const add = ids.filter(id => !have.has(id) && EX[id] && allowedForSwap(id, eq, inj));
+  add.forEach((id, k) => a.exercises.push(makeActiveExercise(freeEntry(id, a.exercises.length + k, eq, null, a.deload), a.deload, eq)));
+  if (add.length) { a.focus = 'x' + (a.exercises.length - add.length); ui.woView = 'focus'; }
+  ui.picker = null; closeDialog(); save(); render(); window.scrollTo(0, 0);
+  toast(add.length ? `${add.length === 1 ? 'Übung' : add.length + ' Übungen'} hinzugefügt.` : 'Diese Übungen sind schon dabei.');
+}
+/* Auswahl-Dialog: Vorlagen (Bauch, Arme …) oder eigene Auswahl nach Muskel */
+function openPicker(mode, preset) {
+  const eq = pickerEq(), have = mode === 'add' && state.active ? state.active.exercises.map(x => x.exId) : [];
+  const key = (state.active ? state.active.id : 'frei') + (eq === HOME_EQUIPMENT ? ':h' : ':g');
+  if (!ui.picker || ui.picker.mode !== mode || ui.picker.key !== key || preset) ui.picker = { mode, key, sel: preset ? presetExercises(preset, eq, have) : [], muscle: preset ? EXTRA_PRESETS[preset].muscles[0] : 'abs', preset: preset || null };
+  const p = ui.picker, list = freeCandidates(p.muscle, eq).filter(o => !have.includes(o.id)).slice(0, 14);
+  const selNames = p.sel.map(id => EX[id].name);
+  openDialog(`${closeBtn()}<h2 id="dlgTitle">${mode === 'add' ? 'Übung hinzufügen' : 'Extra-Training'}</h2>
+    <p class="muted small" style="margin-top:0">${mode === 'add' ? 'Kommt ans Ende deines Trainings – z. B. ein kurzes Bauchtraining.' : 'Läuft außerhalb deines Plans: zählt nicht als Plan-Einheit, landet aber im Verlauf und hilft bei den Gewichtsvorschlägen.'}</p>
+    <div class="preset-row">${Object.entries(EXTRA_PRESETS).map(([k, v]) => `<button type="button" class="btn sm ${p.preset === k ? 'primary' : 'soft'}" data-action="pick-preset" data-id="${k}">${v.icon} ${esc(v.label)}</button>`).join('')}</div>
+    <label for="pickMuscle" class="small" style="display:block;margin:12px 0 4px"><strong>Oder selbst wählen</strong></label>
+    <select id="pickMuscle">${TRACKED.map(m => `<option value="${m}" ${p.muscle === m ? 'selected' : ''}>${esc(MUSCLES[m].name)}</option>`).join('')}</select>
+    <ul class="clean pick-list">${list.map(o => `<li><label class="pick-item"><input type="checkbox" data-pick="${o.id}" ${p.sel.includes(o.id) ? 'checked' : ''}><span><strong>${esc(o.name)}</strong><small>${esc(muscleList(o.primary))} · ${o.category === 'compound' ? 'Grundübung' : 'Isolation'}${isLiked(state.prefs, o.id) ? ' · Favorit' : ''}</small></span></label></li>`).join('') || '<li class="muted small">Keine passende Übung mit deinem Equipment.</li>'}</ul>
+    <p class="small" id="pickSel" aria-live="polite" style="margin:10px 0 0">${selNames.length ? `<strong>Gewählt (${selNames.length}):</strong> ${esc(selNames.join(', '))}` : 'Noch nichts gewählt.'}</p>
+    <div class="dlg-actions"><button type="button" class="btn" data-action="dlg-close">Abbrechen</button><button type="button" class="btn primary" data-action="pick-go" ${p.sel.length ? '' : 'disabled'}>${mode === 'add' ? 'Hinzufügen' : 'Training starten'}</button></div>`);
+}
+/* Eine Plan-Einheit auslassen (z. B. Beine, wenn es gerade nicht geht) – rückgängig im Plan */
+function skipSession(w, d) {
+  const plan = state.plan, day = plan && plan.weeks[w] && plan.weeks[w].days[d];
+  if (!day) return;
+  if (state.active && state.active.planId === plan.id && state.active.week === w && state.active.day === d) { toast('Diese Einheit läuft gerade.'); return; }
+  confirmDialog({ title: `${day.name} auslassen?`, text: `Die Einheit zählt in Woche ${w + 1} als ausgelassen, weiter geht es mit der nächsten. Rückgängig machen kannst du das im Plan.`, ok: 'Auslassen' }).then(ok => {
+    if (!ok) return;
+    plan.skipped = plan.skipped || {}; plan.skipped[sessionKey(w, d)] = true; ui.todayPick = null;
+    save(); render(); toast(`${day.name} ausgelassen.`);
+  });
 }
 function lastSessionText(exId) {
   const h = exerciseHistory(exId);
@@ -5692,7 +5831,8 @@ function endCards(a) {
     <p class="hint" style="margin-bottom:0">Sanft bis zu leichtem Ziehen dehnen, nicht wippen, ruhig weiteratmen.</p></section>` : ''}`;
 }
 function notesCard(a) {
-  return `<div class="card">
+  return `<div class="card soft"><div class="row between" style="flex-wrap:nowrap"><div><strong>Noch etwas dranhängen?</strong><div class="small muted">z. B. ein kurzes Bauchtraining</div></div><button type="button" class="btn sm soft" data-action="add-ex" data-id="abs">${icon('plus')} Übung</button></div></div>
+  <div class="card">
     <label for="sessNotes"><strong>Notizen zur Einheit</strong></label>
     <textarea id="sessNotes" data-wnotes="session" placeholder="z. B. Schlaf, Energie, Besonderheiten" style="margin-top:8px">${esc(a.notes)}</textarea>
     <div class="row" style="margin-top:12px"><button type="button" class="btn primary" data-action="finish-workout">Training beenden</button>
@@ -5760,7 +5900,8 @@ function woOverview(a) {
   rows.push(`<li class="ex-li ${cur.key === 'end' ? 'cur' : ''}"><span class="ex-idx warm" aria-hidden="true">${icon('heart')}</span><span class="ex-body">${go('end', '<span class="ex-name">Cooldown & Abschluss</span>')}<span class="ex-sub">${cooldown.length ? `ca. ${a.coolMin || 3} Min · optional` : 'Notizen & beenden'}</span></span><span class="ex-dose">${cooldown.length ? `<span class="chip">${cN}/${cooldown.length}</span>` : ''}</span></li>`);
   return `${a.limits ? limitsNotice(a.limits) : ''}
     <section class="card" aria-labelledby="flowHead"><div class="card-head"><div><h2 id="flowHead">Ablauf heute</h2><div class="card-sub">Tippe auf eine Übung, um dorthin zu springen. Kommende Übungen kannst du schon jetzt tauschen oder auslassen.</div></div></div>
-      <ul class="ex-list wo-flow">${rows.join('')}</ul></section>
+      <ul class="ex-list wo-flow">${rows.join('')}</ul>
+      <button type="button" class="btn sm soft" data-action="add-ex" style="margin-top:10px">${icon('plus')} Übung hinzufügen</button></section>
     ${notesCard(a)}`;
 }
 /* Tauschmöglichkeit aus der Lastgrenzen-Leiter: heute, nur im Plan oder gar nicht */
@@ -5832,7 +5973,7 @@ function predictReps(x) {
 function targetBlock(x, i, ex, eq) {
   const s = x.sugg || {}, p = x.planned, showW = showWeightInput(ex), reps = s.reps || p.repRange;
   const wv = showW ? targetW(x) : null;
-  const rx = `× ${reps[0]}–${reps[1]} ${unitLabel(ex)} · RIR ${p.rir}`;
+  const rx = `× ${reps[0]}–${reps[1]} ${repLabel(ex)} · RIR ${p.rir}`;
   let main;
   const bwOnly = ex.loadType === 'bodyweight' && !(wv > 0);
   if (wv != null && !bwOnly) main = `<span class="t-kg">${ex.loadType === 'bodyweight' ? '+' : ''}${fmtNum(wv)}</span><span class="t-unit">${unitTxt(ex)}</span><span class="t-rx">${rx}</span>`;
@@ -5873,10 +6014,11 @@ function exerciseCard(x, i, warmMode, info) {
     <div class="ex-card-head"><span class="ex-idx ${allDone ? 'done' : ''}" aria-hidden="true">${allDone ? icon('check') : liveNo(a, i)}</span>
       <div style="flex:1;min-width:0"><h3 id="exh-${i}" style="margin:0">${esc(ex.name)}</h3><div class="meta">${esc(muscleList(ex.primary))}</div></div></div>
     ${targetBlock(x, i, ex, eq)}
-    <div class="presc-pills"><span class="pill"><b>${p.sets} × ${p.repRange[0]}–${p.repRange[1]}</b> ${unitLabel(ex)}</span><span class="pill">RIR <b>${p.rir}</b></span><span class="pill">Pause <b>${fmtRest(p.restSec)}</b></span></div>
+    <div class="presc-pills"><span class="pill"><b>${p.sets} × ${p.repRange[0]}–${p.repRange[1]}</b> ${repLabel(ex)}</span><span class="pill">RIR <b>${p.rir}</b></span><span class="pill">Pause <b>${fmtRest(p.restSec)}</b></span></div>
+    ${repLabel(ex) === 'Wdh. je Arm' && !ex.unilateral ? '<p class="meta">Wiederholungen je Arm: Bei abwechselnder Ausführung heißt 10 Wdh. 10 links und 10 rechts.</p>' : repLabel(ex) !== unitLabel(ex) ? `<p class="meta">Wiederholungen ${esc(repLabel(ex).replace('Wdh. ', ''))} – erst eine Seite, dann die andere.</p>` : ''}
     ${restricted ? '<div class="notice warn small"><strong>Ohne Partner/Sicherungsarme</strong>Nur mit RIR ≥ 3 – nie bis ans Versagen. Ohne Klemmen trainieren.</div>' : ''}
     ${wu.length ? `<p class="warm-list"><strong>Aufwärmsätze:</strong> ${wu.map(w => `${fmtKg(w.kg)} × ${w.reps}`).join(' · ')}</p>` : ''}
-    <div class="set-grid ${showW ? '' : 'no-w'} set-head" aria-hidden="true"><span>Satz</span>${showW ? `<span>${ex.loadType === 'bodyweight' ? '+kg' : 'kg'}${ex.loadType === 'dumbbell' ? ' je KH' : ''}</span>` : ''}<span>${unitLabel(ex)}</span><span>RIR</span><span></span></div>
+    <div class="set-grid ${showW ? '' : 'no-w'} set-head" aria-hidden="true"><span>Satz</span>${showW ? `<span>${ex.loadType === 'bodyweight' ? '+kg' : 'kg'}${ex.loadType === 'dumbbell' ? ' je KH' : ''}</span>` : ''}<span>${repLabel(ex).replace('Wdh. je ', 'Wdh./')}</span><span>RIR</span><span></span></div>
     ${(() => { const xp = Object.assign({}, x, { _pred: predictReps(x) }); return x.sets.map((st, j) => `<div class="set-grid set-row ${showW ? '' : 'no-w'} ${st.done ? 'done' : ''} ${st.skipped ? 'skipped' : ''}">
       <span class="set-no">${j + 1}${st.pr ? '<br><span class="pr-flag" title="Neuer Rekord">PR</span>' : ''}</span>
       ${setRow(xp, i, j, showW)}
@@ -6051,7 +6193,8 @@ function finishWorkout(force) {
   if ((a.power || []).length) log.power = a.power.filter((p, k) => (a.wcDone || {})['pow' + k]).map(p => ({ id: p.id, sets: p.sets, reps: p.reps }));
   if (a.limits) { log.limits = Object.assign({ home: !!a.limits.home, regions: a.limits.regions, muscles: a.limits.muscles }, a.limits.minutes ? { minutes: a.limits.minutes } : {}); state.dayLimits = null; } // Tagesform-Einschränkung ist damit verbraucht
   state.logs.push(log);
-  if (state.plan && state.plan.id === a.planId) state.plan.done[sessionKey(a.week, a.day)] = log.id;
+  if (a.free) { log.free = true; log.planId = null; }
+  else if (state.plan && state.plan.id === a.planId) { const k = sessionKey(a.week, a.day); state.plan.done[k] = log.id; if (state.plan.skipped) delete state.plan.skipped[k]; }
   const coolLeft = (a.cooldown || []).filter((c, k) => !(a.wcDone || {})['cool' + k]);
   const omitted = a.exercises.filter(x => x.omitted).map(x => EX[x.exId].name).concat(a.powerOmitted ? ['Sprungkraft'] : []);
   state.active = null;
@@ -6080,7 +6223,7 @@ function showSummary(log, extra = {}) {
     ${(extra.omitted || []).length ? `<p class="muted small" style="margin-top:12px">Heute ausgelassen: ${esc(extra.omitted.join(', '))}</p>` : ''}
     <p class="muted small" style="margin-top:12px">Letzte 30 Tage: ${cur.length} ${cur.length === 1 ? 'Einheit' : 'Einheiten'}${prev.length ? ` (${cmp(cur.length, prev.length)} ggü. Vormonat)` : ''}.</p>
     ${(extra.coolLeft || []).length ? `<div class="notice info"><strong>Noch ${extra.coolMin ? 'ca. ' + extra.coolMin + ' Min ' : ''}für den Cooldown? (optional)</strong>${extra.coolLeft.map(c => esc(c.name ? `${c.name} (${c.dose})` : wcLabel(c))).join(' · ')}</div>` : ''}
-    <div class="dlg-actions"><button type="button" class="btn primary" data-action="dlg-close" autofocus>Fertig</button></div>`);
+    <div class="dlg-actions"><button type="button" class="btn" data-action="extra-open" data-id="abs">🧱 Noch kurz Bauch?</button><button type="button" class="btn primary" data-action="dlg-close" autofocus>Fertig</button></div>`);
 }
 
 /* =====================================================================
@@ -6152,7 +6295,7 @@ function dayCard(plan, w, d, di, nx) {
   const leg = LEG_TYPES.includes(d.type);
   return `<details class="card day-card" ${isNext || (!nx && di === 0) ? 'open' : ''}>
     <summary><span class="day-badge ${done ? 'done' : leg ? 'leg' : ''}" aria-hidden="true">${fixedGymDays(state.profile) ? `<small>Tag ${di + 1}</small>${WEEKDAYS[d.weekday]}` : `<small>Tag</small>${di + 1}`}</span>
-      <div class="day-head"><h3>${esc(d.name)} ${done ? '<span class="chip ok">erledigt</span>' : skipped ? '<span class="chip">übersprungen</span>' : isNext ? '<span class="chip accent">als Nächstes</span>' : ''}</h3>
+      <div class="day-head"><h3>${esc(d.name)} ${done ? '<span class="chip ok">erledigt</span>' : skipped ? `<span class="chip">${skipped === 'deload' ? 'übersprungen (Erholungswoche)' : 'ausgelassen'}</span>` : isNext ? '<span class="chip accent">als Nächstes</span>' : ''}</h3>
       <div class="meta">ca. ${d.estMin} Min${d.budget && plan.dayBudgets && plan.dayBudgets.some(b => b !== plan.dayBudgets[0]) ? ` von ${minLabel(d.budget)}` : ''} · ${d.entries.length} Übungen · ${d.entries.reduce((a, e) => a + e.sets, 0)} Sätze${(d.power || []).length ? ' · ⚡ Sprungkraft' : ''}</div></div>${icon('chev', 'chev')}</summary>
     <div class="day-body">
       ${(() => { const B = dayBudgetOf(plan, d), std = Number(state.profile && state.profile.sessionMin) || Number(plan.sessionMin) || 60, fx = fixedGymDays(state.profile);
@@ -6162,6 +6305,7 @@ function dayCard(plan, w, d, di, nx) {
       ${d.entries.map((e, k) => planEntry(e, w, di, k)).join('')}
       ${d.prevention && d.prevention.length ? `<div class="block-line"><span class="ex-idx" aria-hidden="true">🛡️</span><div><span class="bl-title">Prävention · optional</span><span class="bl-text">${esc(d.prevention.map(p => EX[p.exId].name + ' (' + p.dose + ')').join(' · '))}</span></div></div>` : ''}
       ${wcPlanBlock('Cooldown', d.coolMin, d.cooldown)}
+      ${done || skipped === 'deload' ? '' : `<div class="row" style="margin-top:8px">${skipped ? `<button type="button" class="btn sm soft" data-action="unskip-session" data-w="${w}" data-d="${di}">Doch machen</button>` : `<button type="button" class="btn sm ghost" data-action="pick-session" data-w="${w}" data-d="${di}">Heute machen</button><button type="button" class="btn sm ghost" data-action="skip-session" data-w="${w}" data-d="${di}">Auslassen</button>`}</div>`}
     </div>
   </details>`;
 }
@@ -6186,6 +6330,7 @@ function planEntry(e, w, di, k) {
       ${ex.note ? `<p class="meta">${esc(ex.note)}</p>` : ''}
       <p class="meta">Tempo: ${esc(tempoHint(ex))}</p>
       <p class="meta">${ex.secondary.filter(m => MUSCLES[m]).length ? 'Hilft mit: ' + esc(muscleList(ex.secondary)) + ' · ' : ''}${esc(ex.equipment.map(q => EQUIPMENT_LABELS[q] || q).join(', ') || 'Körpergewicht')}${cap ? ` · Kurzhanteln bis ${fmtKg(cap)}` : ''}</p>
+      ${repLabel(ex) !== unitLabel(ex) ? `<p class="meta">Wiederholungen zählen ${repLabel(ex).replace('Wdh. ', '')}${ex.unilateral ? '' : ' – ob beide Arme gleichzeitig oder abwechselnd: jeder Arm schafft die angegebene Zahl'}.</p>` : ''}
       ${e.superset ? '<p class="meta">Supersatz: direkt nach der Partnerübung, ohne Pause dazwischen – Pause erst nach beiden.</p>' : ''}
       <div class="row" style="margin-top:8px"><button type="button" class="btn sm soft" data-action="swap-open" data-uid="${esc(e.uid)}" data-w="${w}" data-d="${di}">${icon('swap')} Übung tauschen</button></div>
     </div>
@@ -6340,7 +6485,7 @@ function openSwap(ctx) {
   const rows = r.list.map(c => {
     const ex = EX[c.id], hint = swapWeightHint(c.id, presc(c.id), eq);
     return `<li class="swap-row"><div class="row between" style="flex-wrap:nowrap;align-items:flex-start"><div style="min-width:0"><strong>${esc(ex.name)}</strong>
-      <div class="meta">${esc(muscleList(ex.primary))} · ${ex.category === 'compound' ? 'Grundübung' : 'Isolation'} · ${ex.repRange[0]}–${ex.repRange[1]} ${unitLabel(ex)}${hint ? ' · ' + esc(hint) : ''}</div>
+      <div class="meta">${esc(muscleList(ex.primary))} · ${ex.category === 'compound' ? 'Grundübung' : 'Isolation'} · ${ex.repRange[0]}–${ex.repRange[1]} ${repLabel(ex)}${hint ? ' · ' + esc(hint) : ''}</div>
       ${badges(c) ? `<div class="chips-row">${badges(c)}</div>` : ''}</div>
       <button type="button" class="btn sm primary" data-action="swap-to" data-id="${c.id}">Wählen</button></div></li>`;
   }).join('');
@@ -6833,7 +6978,7 @@ function earlyDeload() {
   confirmDialog({ title: 'Erholungswoche vorziehen?', text: 'Die restlichen Aufbau-Einheiten dieses Blocks werden übersprungen, als Nächstes folgt die Erholungswoche (etwa halbe Sätze, ca. 90 % Gewicht, mehr Luft nach oben).', ok: 'Erholungswoche starten' }).then(ok => {
     if (!ok) return;
     plan.skipped = plan.skipped || {};
-    for (let w = 0; w < dl; w++) plan.weeks[w].days.forEach((d, i) => { const k = sessionKey(w, i); if (!plan.done[k]) plan.skipped[k] = true; });
+    for (let w = 0; w < dl; w++) plan.weeks[w].days.forEach((d, i) => { const k = sessionKey(w, i); if (!plan.done[k]) plan.skipped[k] = 'deload'; });
     plan.earlyDeload = true; ui.planWeek = dl;
     save(); render(); toast('Die Erholungswoche ist jetzt dran.');
   });
@@ -7048,6 +7193,12 @@ const ACTIONS = {
   },
   'swap-omit': () => swapOmit(),
   'day-time': el => openDayTime(Number(el.dataset.d)),
+  'skip-session': el => skipSession(Number(el.dataset.w), Number(el.dataset.d)),
+  'unskip-session': el => { const p = state.plan, k = sessionKey(Number(el.dataset.w), Number(el.dataset.d)); if (p && p.skipped) { delete p.skipped[k]; save(); render(); toast('Die Einheit ist wieder offen.'); } },
+  'extra-open': el => { if (state.active) { openPicker('add', el.dataset.id || null); return; } closeDialog(); setTimeout(() => openPicker('free', el.dataset.id || null), 0); },
+  'add-ex': el => { if (state.active) openPicker('add', el.dataset.id || null); },
+  'pick-preset': el => openPicker(ui.picker ? ui.picker.mode : 'free', el.dataset.id),
+  'pick-go': () => { const p = ui.picker; if (!p || !p.sel.length) return; if (p.mode === 'add') addToWorkout(p.sel); else startFreeWorkout(p.sel, p.preset ? `Extra: ${EXTRA_PRESETS[p.preset].label}` : 'Freies Training'); },
   'day-time-ok': () => {
     const c = document.querySelector('input[name="dtime"]:checked'), di = ui.dayTime;
     if (di == null) return;
@@ -7115,7 +7266,7 @@ const ACTIONS = {
   'body-del': el => confirmDialog({ title: 'Eintrag löschen?', text: `Körperwerte vom ${fmtDate(el.dataset.date)} löschen?`, ok: 'Löschen', danger: true }).then(ok => { if (ok) { state.body = state.body.filter(b => b.date !== el.dataset.date); save(); render(); } }),
   'dlg-close': () => closeDialog(),
   'dlg-resolve': el => closeDialog(el.dataset.v === '1'),
-  'pick-session': el => { ui.todayPick = `${el.dataset.w}-${el.dataset.d}`; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+  'pick-session': el => { ui.todayPick = `${el.dataset.w}-${el.dataset.d}`; if (ui.tab !== 'heute') go('heute'); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'pw-timer': el => { if (!state.active) return; const p = (state.active.power || [])[Number(el.dataset.x)]; if (p) { ensureAudio(); startTimer(p.rest, p.name); } }
 };
 
@@ -7123,7 +7274,30 @@ function onChange(e) {
   const el = e.target;
   const ob = ui.onboarding;
   if (el.id === 'importFile' && el.files && el.files[0]) { doImportFile(el.files[0]); return; }
-  if (el.id === 'pickSess' && el.value) { ui.todayPick = el.value; render(); return; } // erst anzeigen, Start per Knopf
+  if (el.id === 'pickSess' && el.value) {
+    if (el.value === 'free') { openPicker('free', null); render(); return; }
+    if (el.value.startsWith('again:')) {
+      // Schon erledigte Einheit nochmal: als Extra außerhalb des Plans
+      const [w, d] = el.value.slice(6).split('-').map(Number), day = state.plan.weeks[w].days[d];
+      confirmDialog({ title: `${day.name} nochmal?`, text: 'Die Einheit ist diese Woche schon erledigt. Du kannst sie als Extra-Training wiederholen – sie zählt dann nicht für den Plan.', ok: 'Als Extra starten' })
+        .then(ok => { if (ok) startFreeWorkout(day.entries.map(e => e.exId), `${day.name} (Extra)`); else render(); });
+      return;
+    }
+    ui.todayPick = el.value; render(); return; // erst anzeigen, Start per Knopf
+  }
+  if (el.id === 'pickMuscle' && ui.picker) { ui.picker.muscle = el.value; openPicker(ui.picker.mode); return; }
+  if (el.dataset.pick && ui.picker) {
+    const id = el.dataset.pick, p = ui.picker;
+    if (el.checked && !p.sel.includes(id)) p.sel.push(id);
+    if (!el.checked) p.sel = p.sel.filter(x => x !== id);
+    p.preset = null;
+    // nur Anzeige aktualisieren – Liste, Scrollposition und Fokus bleiben
+    const info = document.getElementById('pickSel'), go = document.querySelector('[data-action="pick-go"]');
+    if (info) info.innerHTML = p.sel.length ? `<strong>Gewählt (${p.sel.length}):</strong> ${esc(p.sel.map(x => EX[x].name).join(', '))}` : 'Noch nichts gewählt.';
+    if (go) go.disabled = !p.sel.length;
+    document.querySelectorAll('[data-action="pick-preset"]').forEach(b => { b.classList.remove('primary'); b.classList.add('soft'); });
+    return;
+  }
   if (el.id === 'pcBar') { updatePlates(); return; }
   if (ob) {
     const d = ob.data;
