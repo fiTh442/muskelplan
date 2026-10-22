@@ -7528,10 +7528,20 @@ function onSubmit(e) {
    INIT
    ===================================================================== */
 /* Offline-Betrieb: Service Worker (sw.js) nur über http(s) – beim Öffnen als lokale Datei nicht möglich */
+/* Updates: beim Zurückkehren in die App nach einer neuen Version fragen; ist sie da, neu laden – aber nie mitten im Training */
+let swUpdatePending = false;
 function registerServiceWorker() {
-  try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {}); }
-  catch (e) { /* optional */ }
+  try {
+    if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) { swUpdatePending = true; applySwUpdate(); } });
+  } catch (e) { /* optional */ }
 }
+function checkForUpdate() {
+  try { if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {}); } catch (e) { /* optional */ }
+}
+function applySwUpdate() { if (swUpdatePending && !state.active && !document.querySelector('dialog[open]')) { swUpdatePending = false; save(true); location.reload(); } }
 /* Browser um dauerhaften Speicher bitten, damit er die Daten nicht von selbst aufräumt */
 function requestPersistentStorage() {
   try {
@@ -7571,7 +7581,7 @@ function init() {
     if (t) { if (sync) toast('Dieses Gerät ist bereits mit dem Online-Sync verbunden.'); else openSyncSetup(t); return; }
     ui.tab = parseHash(); render(); $('#main').focus({ preventScroll: true });
   });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (state.active) requestWakeLock(); tickTimer(); } syncOnVisibility(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (state.active) requestWakeLock(); tickTimer(); checkForUpdate(); applySwUpdate(); } syncOnVisibility(); });
   window.addEventListener('online', () => { if (sync) syncNow(); });
   window.addEventListener('focus', syncOnVisibility); // Desktop: Fensterwechsel ändert die Sichtbarkeit nicht
   setInterval(updateElapsed, 30000);
