@@ -3884,6 +3884,16 @@ function testSport(errors, full) {
       if (dayMinutes(ad.day) > Math.max(dayBudgetOf(plan, d), dayMinutes(d)) + 0.5) E('2 Tage hintereinander: Zeitbudget überschritten');
       state.restFull = todayISO();
       if ((effectiveLimits(plan, d) || {}).tired) E('„Heute doch voll trainieren“ wirkt nicht');
+      // Kurzes Ober-/Unterkörper-Extra, auch zuhause ohne Equipment: nur ausgeruhte Muskeln, wenn genug übrig bleibt
+      state.logs = [logOf(ago(1), d.entries.map(e => e.exId))];
+      ['upper', 'lower'].forEach(r => [HOME_EQUIPMENT, base].forEach(eq => {
+        const fresh = regionExercises(r, eq, 6), rested = presetExercises(r, eq), tired = [...recentMuscles()];
+        if (fresh.length < 4) E(`${r}-Workout ${eq === HOME_EQUIPMENT ? 'zuhause' : 'Kraftraum'}: nur ${fresh.length} Übungen`);
+        if (fresh.concat(rested).some(id => !allowedForSwap(id, eq, []))) E(`${r}-Workout mit nicht verfügbarer Übung`);
+        if (fresh.some(id => (r === 'lower') !== (regionOf(EX[id]) === 'lower' || EX[id].primary[0] === 'abs'))) E(`${r}-Workout mit Übung aus der anderen Körperhälfte`);
+        const ok = regionExercises(r, eq, 6, tired);
+        if (ok.length >= 3 && rested.some(id => EX[id].primary.some(m => tired.includes(m)))) E(`${r}-Workout trainiert gestern trainierte Muskeln, obwohl genug ausgeruhte da sind`);
+      }));
     } finally { Object.assign(state, keep); }
   }
   // Reduktion wirkt: weniger Beinvolumen als ohne Sport, Oberkörper unverändert
@@ -5442,6 +5452,16 @@ function tagesformCard(day, lim, ad, ci) {
 }
 /* Zwei Tage hintereinander: Training ist möglich – gestern trainierte Muskeln sind heute nur etwas lockerer.
    Willst du heute trotzdem voll trainieren, gilt das bis morgen (state.restFull). */
+/* Alternative: kurzes Workout nur für ausgeruhte Muskeln (am Kraftraum oder zuhause, je nach Ort) –
+   Unterkörper nicht vor dem Handball/Spiel */
+function restedOffer() {
+  const eq = pickerEq(), skip = [...recentMuscles()], sd = sportDays(state.profile && state.profile.extraSport);
+  const opts = ['upper', 'lower'].filter(r => !(r === 'lower' && legBlocked(todayWd(), sd)))
+    .filter(r => regionExercises(r, eq, regionCount(), skip).length >= 3);
+  if (!opts.length) return '';
+  return `<p style="margin:8px 0 0">Lieber nur ausgeruhte Muskeln${eq === HOME_EQUIPMENT ? ' – auch ohne Equipment' : ''}? Dann mach ein kurzes Extra:</p>
+      <div class="row" style="margin-top:6px">${opts.map(r => `<button type="button" class="btn sm primary" data-action="extra-open" data-id="${r}">${EXTRA_PRESETS[r].icon} ${EXTRA_PRESETS[r].label}</button>`).join('')}</div>`;
+}
 function recoveryHint(ad, day, wk) {
   if (wk.deload) return '';
   const easier = (ad && ad.easier) || [];
@@ -5449,7 +5469,7 @@ function recoveryHint(ad, day, wk) {
     const m = ad.tired, today = recentMuscles().today, when = today && m.some(x => today.has(x)) ? 'heute' : 'gestern';
     const nLess = easier.filter(x => x.sets < x.setsFrom).length, less = nLess ? (nLess < easier.length ? 'teils 1 Satz weniger, ' : '1 Satz weniger, ') : '';
     return `<div class="notice info"><strong>Zwei Tage hintereinander? Klar.</strong>${esc(muscleList(m))} ${m.length === 1 ? 'war' : 'waren'} ${when} schon dran. Diese Übungen sind heute etwas lockerer (${less}1 Wiederholung mehr Luft) – so trainierst du und erholst dich trotzdem.${ad.filled ? ' Die frei gewordene Zeit bekommen deine ausgeruhten Muskeln.' : ''}
-      <div class="row" style="margin-top:8px"><button type="button" class="btn sm" data-action="rest-full">Heute doch voll trainieren</button></div></div>`;
+      ${restedOffer()}<div class="row" style="margin-top:8px"><button type="button" class="btn sm" data-action="rest-full">Heute doch voll trainieren</button></div></div>`;
   }
   if (state.restFull === todayISO() && tiredFor(day, true).length) return `<div class="notice info"><strong>Heute voll wie geplant</strong>Auch ${esc(muscleList(tiredFor(day, true)))} trainierst du heute voll, obwohl sie gerade erst dran waren. Fühlt sich ein Muskel noch platt an, lass dort einfach 1 Satz weg.
       <div class="row" style="margin-top:8px"><button type="button" class="btn sm ghost" data-action="rest-adapt">Doch etwas lockerer</button></div></div>`;
@@ -5589,6 +5609,8 @@ function startWorkout(w, d) {
 /* ---------- Freies Training & Extras (außerhalb des Plans) ----------
    Zählt nicht als Plan-Einheit, fließt aber in Verlauf, Progression und Kraftkurve ein. */
 const EXTRA_PRESETS = {
+  upper: { label: 'Oberkörper', icon: '🏋️', region: 'upper', muscles: ['chest', 'lats', 'upperback', 'delts_side', 'triceps', 'biceps', 'delts_rear', 'delts_front'] },
+  lower: { label: 'Unterkörper', icon: '🏃', region: 'lower', muscles: ['quads', 'hamstrings', 'glutes', 'calves', 'abs'] },
   abs: { label: 'Bauch', icon: '🧱', muscles: ['abs'], n: 3 },
   arms: { label: 'Arme', icon: '💪', muscles: ['biceps', 'triceps'], n: 2 },
   shoulders: { label: 'Schultern', icon: '🎯', muscles: ['delts_side', 'delts_rear'], n: 2 },
@@ -5607,10 +5629,35 @@ function patRank(id) {
   for (const k of PATTERN_KEYS) { const i = PATTERNS[k].indexOf(id); if (i >= 0) return i; }
   return 99;
 }
+/* Kurzes Ober- oder Unterkörper-Workout (auch zuhause ohne Equipment): je Muskel eine Übung, bei großen Muskeln
+   Grundübungen zuerst. Muskeln, die gestern oder heute schon dran waren, bleiben möglichst außen vor. */
+const REGION_ORDER = { upper: EXTRA_PRESETS.upper.muscles, lower: EXTRA_PRESETS.lower.muscles }; // Reihenfolge = Priorität
+const BIG_MUSCLES = ['chest', 'lats', 'upperback', 'quads', 'hamstrings', 'glutes'];
+function regionExercises(region, eq, n, skip = [], exclude = []) {
+  const out = [];
+  for (const m of REGION_ORDER[region]) {
+    if (out.length >= n || skip.includes(m) || out.some(id => EX[id].primary[0] === m)) continue;
+    const c = freeCandidates(m, eq).filter(o => o.primary[0] === m && !out.includes(o.id) && !exclude.includes(o.id) && !o.primary.some(x => skip.includes(x)));
+    if (BIG_MUSCLES.includes(m)) c.sort((a, b) => (b.category === 'compound') - (a.category === 'compound')); // stabil: Favoriten bleiben vorn
+    if (c[0]) out.push(c[0].id);
+  }
+  return out;
+}
+/* Wie viele Übungen passen heute? (3 Sätze je Übung) */
+function regionCount() {
+  const T = todayMinutes(state.dayLimits) || Number(state.profile && state.profile.sessionMin) || 45;
+  return T <= 30 ? 4 : T <= 45 ? 5 : 6;
+}
+/* Ausgeruhte Variante, wenn genug übrig bleibt – sonst alle Muskeln der Region */
+function restedRegionExercises(region, eq, exclude = []) {
+  const n = regionCount(), rested = regionExercises(region, eq, n, [...recentMuscles()], exclude);
+  return rested.length >= 3 ? rested : regionExercises(region, eq, n, [], exclude);
+}
 /* Vorschlag für ein kurzes Extra: je Muskel passende Isolationsübungen (Lieblingsübungen und bekannte zuerst) */
 function presetExercises(key, eq, exclude = []) {
   const pr = EXTRA_PRESETS[key];
   if (!pr) return [];
+  if (pr.region) return restedRegionExercises(pr.region, eq, exclude);
   const out = [];
   pr.muscles.forEach(m => {
     const per = Math.max(1, Math.round(pr.n / pr.muscles.length) + (pr.muscles.length === 1 ? 0 : 0));
