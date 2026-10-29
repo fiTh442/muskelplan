@@ -3884,6 +3884,13 @@ function testSport(errors, full) {
       if (dayMinutes(ad.day) > Math.max(dayBudgetOf(plan, d), dayMinutes(d)) + 0.5) E('2 Tage hintereinander: Zeitbudget überschritten');
       state.restFull = todayISO();
       if ((effectiveLimits(plan, d) || {}).tired) E('„Heute doch voll trainieren“ wirkt nicht');
+      // Erledigte Einheit nochmal als Extra – zuhause: Heimvarianten statt „nichts passt“, keine Beine im Oberkörper
+      [plan, generatePlan(Object.assign({}, profile, { extraSport: { type: 'handball', days: [1, 3], match: 5, intensity: 2, power: true, prevention: true } }), deepClone(base), {})].forEach(pp => pp.weeks[0].days.forEach(pd => {
+        const used = new Set(), got = pd.entries.map(e => allowedForSwap(e.exId, HOME_EQUIPMENT, []) ? e.exId : freeSubstitute(e.exId, HOME_EQUIPMENT, used, e.pattern)).filter(Boolean);
+        got.forEach(x => used.add(x));
+        if (got.length < Math.min(3, pd.entries.length)) E(`${pd.name} als Extra zuhause: nur ${got.length} Übungen`);
+        if (!LEG_TYPES.includes(pd.type) && got.some(x => regionOf(EX[x]) === 'lower')) E(`${pd.name} als Extra zuhause: Beinübung im Oberkörper`);
+      }));
       // Kurzes Ober-/Unterkörper-Extra, auch zuhause ohne Equipment: nur ausgeruhte Muskeln, wenn genug übrig bleibt
       state.logs = [logOf(ago(1), d.entries.map(e => e.exId))];
       ['upper', 'lower'].forEach(r => [HOME_EQUIPMENT, base].forEach(eq => {
@@ -5673,11 +5680,25 @@ function freeEntry(id, k, eq, sets, deload) {
   const rir = computeRIR(ex, w, plan ? plan.mesoLength : 6, dl, eq, rx);
   return { uid: 'f' + k + '-' + id, exId: id, sets: sets || (dl ? 2 : 3), repRange: repRangeFor(ex, rx), restSec: restFor(ex, false), rir: eq === HOME_EQUIPMENT ? Math.min(rir, 2) : rir, superset: null };
 }
-function startFreeWorkout(ids, name) {
+/* Übung, die hier nicht geht (z. B. zuhause): Ersatz für dasselbe Bewegungsmuster, sonst denselben Hauptmuskel */
+function freeSubstitute(id, eq, used, pattern) {
+  const ex = EX[id], inj = (state.profile && state.profile.injuries) || [];
+  const ids = [...(eq === HOME_EQUIPMENT ? homeCandidates({ pattern }, ex) : []), ...freeCandidates(ex.primary[0], eq).filter(o => o.primary[0] === ex.primary[0]).map(o => o.id)];
+  return ids.find(x => EX[x] && !used.has(x) && allowedForSwap(x, eq, inj));
+}
+/* patterns (optional): Bewegungsmuster je Übung, z. B. aus einer Plan-Einheit – für passendere Heimvarianten */
+function startFreeWorkout(ids, name, patterns) {
   if (state.active) { toast('Es läuft schon ein Training – Übungen kannst du dort mit „+ Übung“ dazunehmen.'); return; }
   if (!ids.length) { toast('Bitte mindestens eine Übung wählen.'); return; }
   const eq = pickerEq(), home = eq === HOME_EQUIPMENT, plan = state.plan, nx = plan ? nextSession(plan) : null, dl = freeDeload();
-  ids = ids.filter(id => EX[id] && allowedForSwap(id, eq, (state.profile && state.profile.injuries) || []));
+  const inj = (state.profile && state.profile.injuries) || [], used = new Set();
+  let swapped = 0;
+  ids = ids.map((id, k) => {
+    if (!EX[id]) return null;
+    const pick = allowedForSwap(id, eq, inj) && !used.has(id) ? id : freeSubstitute(id, eq, used, patterns && patterns[k]);
+    if (pick) { used.add(pick); if (pick !== id) swapped++; }
+    return pick;
+  }).filter(Boolean);
   if (!ids.length) { toast('Mit dem Equipment hier passt keine dieser Übungen.'); return; }
   const exs = ids.map((id, k) => makeActiveExercise(freeEntry(id, k, eq, null, dl), dl, eq));
   const compound = ids.some(id => EX[id].category === 'compound');
@@ -5693,6 +5714,7 @@ function startFreeWorkout(ids, name) {
   };
   ui.woView = 'focus'; ui.picker = null;
   closeDialog(); save(true); ensureAudio(); requestWakeLock(); go('heute'); render(); window.scrollTo(0, 0);
+  if (swapped) toast(`${swapped === 1 ? '1 Übung' : swapped + ' Übungen'} durch ${home ? 'Heimvarianten' : 'passende Alternativen'} ersetzt.`);
 }
 /* Übungen in ein laufendes Training aufnehmen (z. B. kurzes Bauchtraining am Ende) */
 function addToWorkout(ids) {
@@ -7389,7 +7411,7 @@ function onChange(e) {
       // Schon erledigte Einheit nochmal: als Extra außerhalb des Plans
       const [w, d] = el.value.slice(6).split('-').map(Number), day = state.plan.weeks[w].days[d];
       confirmDialog({ title: `${day.name} nochmal?`, text: 'Die Einheit ist diese Woche schon erledigt. Du kannst sie als Extra-Training wiederholen – sie zählt dann nicht für den Plan.', ok: 'Als Extra starten' })
-        .then(ok => { if (ok) startFreeWorkout(day.entries.map(e => e.exId), `${day.name} (Extra)`); else render(); });
+        .then(ok => { if (ok) startFreeWorkout(day.entries.map(e => e.exId), `${day.name} (Extra)`, day.entries.map(e => e.pattern)); else render(); });
       return;
     }
     ui.todayPick = el.value; render(); return; // erst anzeigen, Start per Knopf
