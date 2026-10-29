@@ -2698,6 +2698,73 @@ function fitDayToTime(day, T, fit) {
     rest: !day.compact && res.compact ? 'kompakt' : day.compact && !res.compact ? 'normal' : null,
     ssFrom: ss(day), ssTo: ss(res), powerFrom: (day.power || []).length, powerTo: (res.power || []).length, deload } };
 }
+/* ---------- Zuhause ohne Equipment: eigenständiges Heim-Workout ----------
+   Keine Übersetzung Übung für Übung, sondern ein eigenes Workout für die Muskeln der Einheit: wenige wirksame
+   Körpergewichtsübungen, lieber mehr Sätze je Übung als viele Übungen, nahe am Muskelversagen (leichte Lasten wirken
+   dann ähnlich gut). Jeder Satz geht dorthin, wo er für die Woche am meisten Muskelaufbau bringt (abnehmender Nutzen je
+   Muskel, Wochenvolumen der anderen Einheiten eingerechnet), bis die Zeit voll ist – ohne mehr als der Plan vorsieht.
+   Schwache Heim-Optionen (isometrisch, sehr leicht, schwer dosierbar) zählen weniger. */
+const HOME_QUALITY = { pushup: 0.85, 'lateral-door-iso': 0.6, 'wall-sit': 0.6, plank: 0.6, 'lat-prone-pull': 0.7, 'glute-bridge-bw': 0.8, 'dead-bug': 0.8, 'squat-bw-tempo': 0.85, 'curl-towel': 0.85, 'prone-yt-raise': 0.9 };
+function homeExerciseCount(T) { return T <= 30 ? 4 : T <= 45 ? 5 : T <= 60 ? 6 : 7; }
+/* o: { T, skip, tired, injuries, rx, rirFor, prefs, focus, base (Wochenvolumen der anderen Einheiten), corridor, uid } */
+function homeSession(day, shell, o) {
+  const T = o.T || 60, skip = o.skip || [], tired = o.tired || [], focus = o.focus || [], base = o.base || zeroVol(), corr = o.corridor || {};
+  const M = [...new Set(day.entries.flatMap(e => (EX[e.exId] ? EX[e.exId].primary : [])))].filter(m => TRACKED.includes(m) && !skip.includes(m));
+  const planned = computeVolume([day]);
+  const pMax = Math.max(1, ...M.map(m => planned[m]));
+  // Schwerpunkt der Plan-Einheit bleibt erhalten: Muskeln mit mehr geplantem Volumen zählen mehr
+  const wt = m => (M.includes(m) ? MUSCLES[m].f * (0.6 + 0.4 * planned[m] / pMax) * (focus.includes(m) ? 1.5 : 1) * (tired.includes(m) ? 0.4 : 1) : 0);
+  const q = id => HOME_QUALITY[id] || 1;
+  const pool = EXERCISES.filter(ex => allowedForSwap(ex.id, HOME_EQUIPMENT, o.injuries || []) && !ex.needsSpotter && ex.primary.every(m => M.includes(m)) && !isAvoided(o.prefs, ex.id))
+    .sort((a, b) => patRank(a.id) - patRank(b.id) || a.id.localeCompare(b.id));
+  const d = Object.assign({}, shell, { entries: [] });
+  delete d.ssCount;
+  const U = () => {
+    const v = zeroVol();
+    d.entries.forEach(e => { const c = contrib(EX[e.exId]); for (const m in c) if (m in v) v[m] += c[m] * e.sets * q(e.exId); });
+    return M.reduce((a, m) => a + wt(m) * Math.log(1 + base[m] + v[m]), 0);
+  };
+  const capsOK = () => {
+    const v = computeVolume([d]);
+    return M.every(m => directSetsInDay(d, m) <= (tired.includes(m) ? 3 : 10) && v[m] <= planned[m] * 1.2 + 1 + 1e-9 && !(corr[m] && base[m] + v[m] > corr[m][1] + 1e-9));
+  };
+  const fits = () => T >= 999 || dayMinutes(d) <= T + 0.5;
+  const maxN = homeExerciseCount(T);
+  const entryFor = (ex, sets) => ({ uid: `${o.uid || 'h'}-${ex.id}`, exId: ex.id, sets, pattern: (patternsOf(ex.id, true) || [])[0] || null, core: ex.category === 'compound', superset: null, home: true,
+    repRange: repRangeFor(ex, o.rx && o.rx.strength), restSec: restFor(ex, !!d.compact), rir: o.rirFor ? o.rirFor(ex) : 2 });
+  const bonus = ex => (isLiked(o.prefs, ex.id) ? 1.1 : 1) * (ex.lengthenedEmphasis ? 1.05 : 1) * (ex.category === 'compound' ? 1.03 : 1) * (BIG_MUSCLES.includes(ex.primary[0]) ? 1.15 : 1); // große Muskeln zuerst
+  const grow = () => {
+    for (let g = 0; g < 150; g++) {
+      const u0 = U(), t0 = dayMinutes(d);
+      let best = null, bestR = 1e-6;
+      const tryIt = (apply, undo, factor) => {
+        apply();
+        if (fits() && capsOK()) { const r = (U() - u0) / Math.max(0.25, dayMinutes(d) - t0) * factor; if (r > bestR) { bestR = r; best = apply; } }
+        undo();
+      };
+      d.entries.forEach(e => {
+        const ex = EX[e.exId];
+        if (e.sets >= 4) return; // harte Körpergewichtssätze: max. 4 je Übung, danach lieber eine zweite Übung
+        tryIt(() => { e.sets++; }, () => { e.sets--; }, bonus(ex));
+      });
+      if (d.entries.length < maxN) pool.forEach(ex => {
+        if (d.entries.some(e => e.exId === ex.id || EX[e.exId].primary[0] === ex.primary[0] && e.sets < 3)) return; // erst eine Übung je Muskel ausreizen
+        const e = entryFor(ex, 2);
+        const newMuscle = !d.entries.some(o => EX[o.exId].primary.includes(ex.primary[0]));
+        tryIt(() => { d.entries.push(e); }, () => { d.entries.pop(); }, (newMuscle ? 1.15 : 0.85) * bonus(ex)); // neue Muskeln abdecken, sonst lieber mehr Sätze
+      });
+      if (!best) return;
+      best();
+    }
+  };
+  grow();
+  // Knappe Zeit: kleine Muskeln als Supersatz koppeln, die gewonnene Zeit wieder füllen
+  if (T < 999) for (let k = 0; k < 2 && pairOne(d); k++) grow();
+  // Reihenfolge: Muskeln mit dem meisten geplanten Volumen zuerst (Grundübungen vorn regelt sortEntries)
+  d.entries.sort((a, b) => planned[EX[b.exId].primary[0]] - planned[EX[a.exId].primary[0]]);
+  sortEntries(d);
+  return d;
+}
 function adaptDay(day, limits, eq, profileInjuries, rx, fit) {
   const home = !!(limits && limits.home);
   const useEq = home ? HOME_EQUIPMENT : eq;
@@ -2708,7 +2775,7 @@ function adaptDay(day, limits, eq, profileInjuries, rx, fit) {
   // Zuhause: nahe am Muskelversagen, sonst ist Körpergewicht zu leicht (Schoenfeld 2017) – außer im Deload
   const rirFor = o => { const r = computeRIR(o, rx.week, rx.L, rx.deload, useEq, rx.strength); return home && !rx.deload ? Math.min(r, 2) : r; };
   const entries = [], changes = [];
-  for (const e of day.entries) {
+  for (const e of (home ? [] : day.entries)) { // zuhause: eigenes Heim-Workout (unten)
     const ex = EX[e.exId];
     if (!ex) continue;
     const skipped = ex.primary.filter(m => skip.includes(m));
@@ -2767,7 +2834,20 @@ function adaptDay(day, limits, eq, profileInjuries, rx, fit) {
   let time = null, res = out;
   const noMore = [...skip, ...tired]; // keine zusätzlichen Sätze für ausgelassene oder gestern trainierte Muskeln
   let filled = 0;
-  if (T != null && fit) {
+  if (home) {
+    // Eigenständiges Heim-Workout in der verfügbaren Zeit; Wochenkontext aus den anderen Einheiten
+    const others = fit ? fit.wk.days.filter((o, i) => i !== fit.di && !((fit.plan.skipped || {})[sessionKey(fit.w, i)])) : [];
+    const Th = T != null ? T : (rx.budget || Math.round(dayMinutes(day)));
+    if (T == null) out.warmMin = Math.max(4, Math.min(out.warmMin || 6, warmupMinutes(Th)));
+    res = homeSession(day, out, { T: Th, skip, tired, injuries, rx, rirFor, prefs: fit && fit.prefs, focus: (fit && fit.profile && fit.profile.focus) || [],
+      base: fit ? computeVolume(others) : zeroVol(), corridor: (fit && fit.plan.corridor) || {}, uid: day.key || 'h' });
+    // Gestern trainierte Muskeln: weniger Sätze sind schon eingeplant, dazu 1 Wdh. mehr Luft
+    res.entries.forEach(e => {
+      if (!tired.length || !EX[e.exId].primary.some(m => tired.includes(m))) return;
+      easier.push({ uid: e.uid, setsFrom: e.sets, sets: e.sets, rirFrom: e.rir, rir: Math.min(4, e.rir + 1) });
+      e.rir = Math.min(4, e.rir + 1);
+    });
+  } else if (T != null && fit) {
     const r = fitDayToTime(out, T, Object.assign({}, fit, { eq: useEq, injuries, skip: noMore, home, rx, rirFor }));
     res = r.day; time = r.time;
     if (time) time.dropped.forEach(uid => {
@@ -4284,6 +4364,17 @@ function testDayLimits(errors) {
       // Zuhause ohne Equipment – allein und kombiniert mit jeder Beschwerde
       const h = check({ home: true, regions: [], muscles: [] }, `${days} Tage T${di + 1} zuhause`);
       if (h.day.entries.length < Math.min(3, d.entries.length)) E(`${days} Tage T${di + 1} zuhause: nur ${h.day.entries.length} Übungen`);
+      // Eigenständiges Heim-Workout: nur Muskeln der Einheit, passt in die Zeit, wenige Übungen mit 2–4 Sätzen
+      const dayM = new Set(d.entries.flatMap(e => EX[e.exId].primary));
+      [30, 45, 60].forEach(T => {
+        const hh = T === 60 ? h : check({ home: true, regions: [], muscles: [], minutes: T, date: todayISO() }, `${days} Tage T${di + 1} zuhause ${T} Min`);
+        const lbl = `${days} Tage T${di + 1} zuhause ${T} Min`;
+        if (dayMinutes(hh.day) > T + 0.5) E(`${lbl}: ${Math.round(dayMinutes(hh.day))} Min`);
+        if (hh.day.entries.length > homeExerciseCount(T)) E(`${lbl}: ${hh.day.entries.length} Übungen`);
+        if (hh.day.entries.some(e => e.sets < 2 || e.sets > 4)) E(`${lbl}: Satzzahl außerhalb 2–4`);
+        if (hh.day.entries.some(e => EX[e.exId].primary.some(m => !dayM.has(m)))) E(`${lbl}: Übung für Muskeln, die heute nicht dran sind`);
+        if (new Set(hh.day.entries.map(e => EX[e.exId].primary[0])).size < Math.min(2, dayM.size)) E(`${lbl}: nur ein Muskel`);
+      });
       TODAY_REGIONS.forEach(reg => check({ home: true, regions: [reg], muscles: [] }, `${days} Tage T${di + 1} zuhause+${reg}`));
       [...new Set(d.entries.flatMap(e => EX[e.exId].primary))].forEach(m => check({ regions: [], muscles: [m] }, `${days} Tage T${di + 1} ohne ${m}`));
       if (d.entries.some(e => e.exId === 'squat-bb')) {
@@ -5355,6 +5446,9 @@ function viewToday() {
   };
   const extraRows = shown.entries.filter(e => !day.entries.some(o => o.uid === e.uid)).map((e, k) => { const ex = EX[e.exId];
     return `<li class="ex-li"><span class="ex-idx">${day.entries.length + k + 1}</span><span class="ex-body"><span class="ex-name">${esc(ex.name)}</span><span class="ex-sub">heute zusätzlich · ${esc(muscleList(ex.primary))}</span></span><span class="ex-dose"><b>${e.sets} × ${e.repRange[0]}–${e.repRange[1]}</b><small>${unitLabel(ex)} · RIR ${e.rir}</small></span></li>`; }).join('');
+  const homeRow = (a, i) => { const ex = EX[a.exId], ez = ad && (ad.easier || []).find(x => x.uid === a.uid), ssFirst = a.superset ? shown.entries.find(o => o.superset === a.superset) : null;
+    return `<li class="ex-li"><span class="ex-idx">${i + 1}</span><span class="ex-body"><span class="ex-name">${a.superset ? `<span class="ss-tag">Supersatz ${ssFirst && ssFirst.uid === a.uid ? 'A' : 'B'}</span> ` : ''}${esc(ex.name)}</span><span class="ex-sub">${esc(muscleList(ex.primary))}${ez ? ' · heute lockerer' : ''}</span></span>
+      <span class="ex-dose"><b>${a.sets} × ${a.repRange[0]}–${a.repRange[1]}</b><small>${repLabel(ex)} · RIR ${a.rir}</small></span></li>`; };
   const sideRow = (cls, ic, name, sub, min, note) => `<li class="ex-li"><span class="ex-idx ${cls}">${icon(ic)}</span><span class="ex-body"><span class="ex-name">${name}</span><span class="ex-sub">${sub}</span></span><span class="ex-dose"><b>${min} Min</b>${note ? `<small>${note}</small>` : ''}</span></li>`;
   const power = shown.power || [];
   const changed = ad && (ad.changes.some(c => c.kind === 'skip' || (c.regions || []).length) || (ad.easier || []).length);
@@ -5387,12 +5481,12 @@ function viewToday() {
     </div>
     <fieldset class="time-pick"><legend>Wie viel Zeit hast du heute?</legend>
       <div class="seg time-seg" role="radiogroup" aria-label="Zeit heute">${SESSION_OPTIONS.map(v => `<label><input type="radio" name="todayMin" value="${v}" data-today-min="${autoMin != null ? autoMin : planned}" ${(T != null ? T : planned) === v ? 'checked' : ''}><span>${minLabel(v)}${v === planned ? '<small>geplant</small>' : ''}</span></label>`).join('')}</div>
-      <div class="hint">${esc(lim && lim.auto && ad && ad.time ? `Heute ist ${WEEKDAYS_LONG[todayWd()]} – angepasst an deine ${minLabel(T)} Min. ` : '')}${esc(ad && ad.time ? timeText(ad.time) : `Geplant sind ca. ${shown.estMin || day.estMin} Min. Weniger oder mehr Zeit? Die App passt nur diese Einheit an – dein Plan bleibt.`)}</div></fieldset>
+      <div class="hint">${esc(lim && lim.auto && ad && ad.time ? `Heute ist ${WEEKDAYS_LONG[todayWd()]} – angepasst an deine ${minLabel(T)} Min. ` : '')}${esc(ad && ad.home ? `Dein Heim-Workout ist auf ca. ${shown.estMin} Min ausgelegt – mehr Zeit = mehr Sätze und Übungen.` : ad && ad.time ? timeText(ad.time) : `Geplant sind ca. ${shown.estMin || day.estMin} Min. Weniger oder mehr Zeit? Die App passt nur diese Einheit an – dein Plan bleibt.`)}</div></fieldset>
     ${ad && ad.home ? homeNotice(ad) : ''}
     <ul class="ex-list" style="margin-top:6px">
       ${shown.warmMin ? sideRow('warm', 'heart', 'Aufwärmen', 'Puls, Mobilisation, Aufwärmsätze', shown.warmMin) : ''}
       ${power.length ? sideRow('power', 'bolt', 'Sprungkraft', esc(power.map(p => p.name).join(' · ')), shown.powerMin, 'frisch, direkt danach') : ''}
-      ${day.entries.map(entryRow).join('')}${extraRows}
+      ${ad && ad.home ? shown.entries.map(homeRow).join('') : day.entries.map(entryRow).join('') + extraRows}
       ${day.coolMin ? sideRow('warm', 'heart', 'Cooldown', 'Runterfahren & kurz dehnen (optional)', day.coolMin) : ''}
     </ul>
     <div class="row" style="margin-top:10px"><button type="button" class="btn sm ghost" data-action="skip-session" data-w="${nx.week}" data-d="${nx.day}">${esc(day.name)} auslassen</button></div>
@@ -5413,11 +5507,10 @@ function sportTodayHint(day, plan, nx) {
 }
 /* Hinweis zur Heim-Einheit: was sie ausmacht und was man braucht */
 function homeNotice(ad) {
-  const dropped = ad.changes.filter(c => c.kind === 'drop' && c.home).map(c => muscleList(EX[c.from].primary));
-  return `<div class="notice info"><strong>Heim-Einheit mit Körpergewicht</strong>Jede Übung ist durch eine Variante für denselben Muskel ersetzt. Geh bis kurz vors Muskelversagen (RIR 0–2) und senk langsam ab – dann wirken auch leichte Lasten gut.
+  const M = [...new Set(ad.day.entries.flatMap(e => EX[e.exId].primary))].filter(m => TRACKED.includes(m));
+  return `<div class="notice info"><strong>Dein Heim-Workout</strong>Eigens für zuhause geplant – für ${esc(muscleList(M))}: wenige, wirksame Übungen mit mehr Sätzen statt vieler Ersatzübungen. Ohne Gewichte zählt die Anstrengung: Geh bis kurz vors Muskelversagen (RIR 0–2), senk langsam ab (2–3 s) und halt kurz in der Dehnung.
     ${ad.needs.length ? `<div class="small" style="margin-top:6px"><strong>Du brauchst:</strong> ${esc(ad.needs.join(', '))}</div>` : ''}
-    ${dropped.length ? `<div class="small" style="margin-top:4px">Ohne Equipment heute weggelassen: ${esc([...new Set(dropped)].join(', '))}.</div>` : ''}
-    <div class="small" style="margin-top:4px">Gilt nur für diese Einheit – dein Plan bleibt, wie er ist.</div></div>`;
+    <div class="small" style="margin-top:4px">Zählt als ${esc(ad.day.name)} – dein Plan bleibt, wie er ist.</div></div>`;
 }
 function rxFor(plan, wk, day) {
   return { week: wk.index != null ? wk.index : plan.weeks.indexOf(wk), L: plan.mesoLength, deload: !!wk.deload, strength: planRx(plan), budget: day ? dayBudgetOf(plan, day) : Number(plan.sessionMin) || 60 };
@@ -5450,7 +5543,7 @@ function tagesformCard(day, lim, ad, ci) {
         <div class="hint">Belastende Übungen werden heute durch schonendere für denselben Muskel ersetzt – gibt es keine, entfällt die Übung.</div></fieldset>
       <fieldset><legend>Muskelgruppe heute auslassen</legend><div class="seg">${muscleOpts.map(m => box('muscles', m, MUSCLES[m].short)).join('')}</div>
         <div class="hint">Zum Beispiel bei starkem Muskelkater oder einer Zerrung.</div></fieldset>
-      ${ad && (regs.length || mus.length) ? `<p class="small" style="margin:0 0 8px"><strong>${n('swap')} ersetzt, ${n('drop')} ${n('drop') === 1 ? 'entfällt' : 'entfallen'}</strong> – siehe „Heute dran“.${ad.powerChanged ? ' Sprungkraft ist angepasst.' : ''}${ad.changes.some(c => c.sets) ? ' Einseitige Ersatzübungen haben 1 Satz weniger, damit die Zeit passt.' : ''}</p>` : ''}
+      ${ad && !ad.home && (regs.length || mus.length) ? `<p class="small" style="margin:0 0 8px"><strong>${n('swap')} ersetzt, ${n('drop')} ${n('drop') === 1 ? 'entfällt' : 'entfallen'}</strong> – siehe „Heute dran“.${ad.powerChanged ? ' Sprungkraft ist angepasst.' : ''}${ad.changes.some(c => c.sets) ? ' Einseitige Ersatzübungen haben 1 Satz weniger, damit die Zeit passt.' : ''}</p>` : ''}
       ${ad && !ad.day.entries.length ? '<div class="notice warn"><strong>Heute bleibt keine Übung übrig</strong>Wähle eine andere Einheit oder gönn dir einen Ruhetag.</div>' : ''}
       ${regs.length ? '<div class="notice warn small"><strong>Nur schmerzfrei trainieren</strong>Tut es auch mit der Alternative weh, lass die Übung weg. Bei starken oder anhaltenden Schmerzen bitte ärztlich oder physiotherapeutisch abklären.</div>' : ''}
       <div class="row between"><p class="hint" style="margin:0;flex:1">Gilt nur für die nächste Einheit${lim && lim.date && lim.date !== todayISO() ? ` (eingetragen am ${fmtDate(lim.date, { weekday: 'short', day: '2-digit', month: '2-digit' })})` : ''}. Dauerhafte Beschwerden änderst du im Profil.</p>${regs.length || mus.length ? '<button type="button" class="btn sm" data-action="lim-reset">Zurücksetzen</button>' : ''}</div>
@@ -5687,7 +5780,7 @@ function freeSubstitute(id, eq, used, pattern) {
   return ids.find(x => EX[x] && !used.has(x) && allowedForSwap(x, eq, inj));
 }
 /* patterns (optional): Bewegungsmuster je Übung, z. B. aus einer Plan-Einheit – für passendere Heimvarianten */
-function startFreeWorkout(ids, name, patterns) {
+function startFreeWorkout(ids, name, patterns, setsOf) {
   if (state.active) { toast('Es läuft schon ein Training – Übungen kannst du dort mit „+ Übung“ dazunehmen.'); return; }
   if (!ids.length) { toast('Bitte mindestens eine Übung wählen.'); return; }
   const eq = pickerEq(), home = eq === HOME_EQUIPMENT, plan = state.plan, nx = plan ? nextSession(plan) : null, dl = freeDeload();
@@ -5700,7 +5793,7 @@ function startFreeWorkout(ids, name, patterns) {
     return pick;
   }).filter(Boolean);
   if (!ids.length) { toast('Mit dem Equipment hier passt keine dieser Übungen.'); return; }
-  const exs = ids.map((id, k) => makeActiveExercise(freeEntry(id, k, eq, null, dl), dl, eq));
+  const exs = ids.map((id, k) => makeActiveExercise(freeEntry(id, k, eq, (setsOf && setsOf[id]) || null, dl), dl, eq));
   const compound = ids.some(id => EX[id].category === 'compound');
   const types = new Set(ids.map(id => regionOf(EX[id])));
   const pseudo = { type: types.size > 1 ? 'FB' : types.has('lower') ? 'LO' : 'UP', entries: ids.map(id => ({ exId: id, sets: 3 })) };
@@ -5786,8 +5879,8 @@ function wcChecklist(part, items, hidden) {
 /* Hinweis im Training: was heute wegen Beschwerden/ausgelassener Muskelgruppe angepasst wurde */
 function limitsNotice(l) {
   const ch = l.changes || [];
-  // Zuhause wird fast alles ersetzt → nur Anzahl nennen, Wegfälle einzeln
-  const parts = l.home ? [ch.filter(c => c.kind === 'swap').length + ' Übungen durch Heimvarianten ersetzt', ...ch.filter(c => c.kind !== 'swap' && !c.time).map(c => `${EX[c.from].name} entfällt`)]
+  // Zuhause: eigenes Heim-Workout statt Ersatzübungen
+  const parts = l.home ? ['eigenes Heim-Workout für dieselben Muskeln']
     : ch.filter(c => !c.time).map(c => c.kind === 'swap' ? `${EX[c.to].name} statt ${EX[c.from].name}` : `${EX[c.from].name} entfällt`);
   if (l.time) parts.push(timeText(l.time).replace(/\.$/, ''));
   if (!parts.length && !l.powerChanged && !l.home && !(l.regions || []).length && !(l.muscles || []).length) return '';
@@ -7411,7 +7504,16 @@ function onChange(e) {
       // Schon erledigte Einheit nochmal: als Extra außerhalb des Plans
       const [w, d] = el.value.slice(6).split('-').map(Number), day = state.plan.weeks[w].days[d];
       confirmDialog({ title: `${day.name} nochmal?`, text: 'Die Einheit ist diese Woche schon erledigt. Du kannst sie als Extra-Training wiederholen – sie zählt dann nicht für den Plan.', ok: 'Als Extra starten' })
-        .then(ok => { if (ok) startFreeWorkout(day.entries.map(e => e.exId), `${day.name} (Extra)`, day.entries.map(e => e.pattern)); else render(); });
+        .then(ok => {
+          if (!ok) { render(); return; }
+          // Zuhause: eigenes Heim-Workout für die Muskeln dieser Einheit (statt Übung für Übung)
+          if (pickerEq() === HOME_EQUIPMENT) {
+            const plan = state.plan, wk = plan.weeks[w], rx = rxFor(plan, wk, day), inj = (state.profile && state.profile.injuries) || [];
+            const rirFor = o => { const r = computeRIR(o, rx.week, rx.L, rx.deload, HOME_EQUIPMENT, rx.strength); return rx.deload ? r : Math.min(r, 2); };
+            const hs = homeSession(day, Object.assign({}, day), { T: todayMinutes(state.dayLimits) || rx.budget, tired: tiredFor(day), injuries: inj, rx, rirFor, prefs: state.prefs, focus: (state.profile && state.profile.focus) || [] });
+            startFreeWorkout(hs.entries.map(e => e.exId), `${day.name} zuhause (Extra)`, null, Object.fromEntries(hs.entries.map(e => [e.exId, e.sets])));
+          } else startFreeWorkout(day.entries.map(e => e.exId), `${day.name} (Extra)`, day.entries.map(e => e.pattern));
+        });
       return;
     }
     ui.todayPick = el.value; render(); return; // erst anzeigen, Start per Knopf
